@@ -63,10 +63,10 @@ def main(unused_argv):
       max_wait_secs=3600) as mon_sess:
 
     while not mon_sess.should_stop():
-      unused_var, unused_var2, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var = mon_sess.run(
+      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var = mon_sess.run(
         [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm])
       if step_var % log_count == 0:
-        print("Step: ", step_var)
+        print("Step: ", step_var, "\t\tLoss: ", loss_var)
       if step_var >= FLAGS.max_steps - 1:
         out_var = out_var[0, :, :]
         smooth_var = smooth_var[0, :]
