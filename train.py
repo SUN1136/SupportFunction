@@ -67,40 +67,40 @@ def main(unused_argv):
         [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm])
       if step_var % log_count == 0:
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
+        print("Smoothness: ", smooth_var[0, :])
       if step_var >= FLAGS.max_steps - 1:
         out_var = out_var[0, :, :]
         smooth_var = smooth_var[0, :]
-        beta_var = beta_var[0, :].reshape(-1, )
+        # beta_var = beta_var[0, :].reshape(-1, )
         vert_var = vert_var[0, ...].reshape(-1, 3)
-        locvert_var = locvert_var[0, ...].reshape(-1, 3)
-        dhdz_var = dhdz_var[0, ...].reshape(-1, dhdz_var.shape[-1])
-        zm_var = zm_var[0, ...].reshape(-1, zm_var.shape[-1])
+        # locvert_var = locvert_var[0, ...].reshape(-1, 3)
+        # dhdz_var = dhdz_var[0, ...].reshape(-1, dhdz_var.shape[-1])
+        # zm_var = zm_var[0, ...].reshape(-1, zm_var.shape[-1])
         with tf.io.gfile.GFile(path.join(FLAGS.train_dir, "stats.csv"), "w") as fout:
           fout.write("x,y,z\n")
           for i in range(out_var.shape[0]):
             fout.write("{0},{1},{2}\n".format(out_var[i, 0], out_var[i, 1], out_var[i, 2]))
-          fout.write("beta\n")
-          for i in range(beta_var.shape[0]):
-            fout.write("{}\n".format(beta_var[i]))
-          fout.write("vertex\n")
-          for i in range(vert_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(vert_var[i, 0], vert_var[i, 1], vert_var[i, 2]))
-          fout.write("directions\n")
-          for i in range(direc_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(direc_var[i, 0], direc_var[i, 1], direc_var[i, 2]))
-          fout.write("local vertex\n")
-          for i in range(locvert_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(locvert_var[i, 0], locvert_var[i, 1], locvert_var[i, 2]))
-          fout.write("dhdz\n")
-          for i in range(dhdz_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(dhdz_var[i, 0], dhdz_var[i, 1], dhdz_var[i, 2]))
-          fout.write("zm\n")
-          for i in range(zm_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(zm_var[i, 0], zm_var[i, 1], zm_var[i, 2]))
           fout.write("p\n")
           for i in range(smooth_var.shape[0]):
             fout.write("{}\n".format(smooth_var[i]))
-
+          # fout.write("beta\n")
+          # for i in range(beta_var.shape[0]):
+          #   fout.write("{}\n".format(beta_var[i]))
+          fout.write("vertex\n")
+          for i in range(vert_var.shape[0]):
+            fout.write("{0},{1},{2}\n".format(vert_var[i, 0], vert_var[i, 1], vert_var[i, 2]))
+          # fout.write("directions\n")
+          # for i in range(direc_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(direc_var[i, 0], direc_var[i, 1], direc_var[i, 2]))
+          # fout.write("local vertex\n")
+          # for i in range(locvert_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(locvert_var[i, 0], locvert_var[i, 1], locvert_var[i, 2]))
+          # fout.write("dhdz\n")
+          # for i in range(dhdz_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(dhdz_var[i, 0], dhdz_var[i, 1], dhdz_var[i, 2]))
+          # fout.write("zm\n")
+          # for i in range(zm_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(zm_var[i, 0], zm_var[i, 1], zm_var[i, 2]))
 
 
 if __name__ == "__main__":
