@@ -54,7 +54,7 @@ class MultiConvexNet(keras.Model):
       self.beta_decoder = Decoder(self.n_params)
 
     with tf.variable_scope("mc_convex"):
-      self.cvx = ConvexSurfaceSampler(args.dims, args.n_parts, args.n_convex_altitude, args.n_mesh_inter, args.n_top_k)
+      self.cvx = ConvexSurfaceSampler(args.dims, args.n_parts, args.n_convex_altitude, args.n_mesh_inter, args.n_top_k, args.n_bottom_k)
 
   def compute_loss(self, batch, training, optimizer=None):
     """Compute loss given a batch of data.
@@ -87,7 +87,7 @@ class MultiConvexNet(keras.Model):
       # tf.summary.scalar("y", tf.shape(vertices)[1])
       # tf.summary.scalar("z", tf.shape(vertices)[2])
       tf.summary.scalar("p1", smoothness[0, 0])
-      tf.summary.scalar("p2", smoothness[0, 1])
+      # tf.summary.scalar("p2", smoothness[0, 1])
       tf.summary.scalar("x", out_points[0, 0, 0])
       tf.summary.scalar("y", out_points[0, 0, 1])
       tf.summary.scalar("z", out_points[0, 0, 2])
@@ -100,7 +100,7 @@ class MultiConvexNet(keras.Model):
         gradients, unused_var = tf.clip_by_global_norm(gradients, 5.0)
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
-      return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm
+      return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm, points
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -174,7 +174,7 @@ class MultiConvexNet(keras.Model):
 class ConvexSurfaceSampler(keras.layers.Layer):
   """Differentiable shape rendering layer using multiple convex polytopes."""
 
-  def __init__(self, dims, n_parts, n_th1, n_mesh_inter, nk):
+  def __init__(self, dims, n_parts, n_th1, n_mesh_inter, ntop, nbottom):
     super(ConvexSurfaceSampler, self).__init__()
 
     self._dims = dims
@@ -241,15 +241,15 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       self.mesh_idx.append(idx)
     self.mesh_idx = tf.concat(self.mesh_idx, axis = 0)
 
-    self.nk = nk
+    self.ntop = ntop
+    self.nbottom = nbottom
     self.mesh_filter = []
     for i in range(self._n_mesh):
       tmp = tf.ones([1, 1, 1]) * i
       self.mesh_filter.append(tmp)
     self.mesh_filter = tf.concat(self.mesh_filter, axis = -1)
     self.mesh_filter = tf.expand_dims(self.mesh_filter, axis = -1)
-    self.mesh_filter = tf.tile(self.mesh_filter, [1, 1, 1, self.nk])
-    self.mesh_filter = tf.cast(self.mesh_filter, tf.float32)
+    
 
   def call(self, vertices, smoothness):
     """Decode the support function parameters into surface point samples.
@@ -327,32 +327,51 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
     points = dhdx + translations
 
-    points = self._mesh_interpolation(points, mesh_idx, self._n_mesh_inter)
+    if self.ntop > 0:
+      points = self._mesh_interpolation(points, mesh_idx, self._n_mesh_inter)
     points = self._remove_overlap(points)
 
     return points, dhdz, zm
 
   def _mesh_interpolation(self, x, idx, n_mesh_inter):
-    nk = self.nk
+    ntop = self.ntop
+    nbottom = self.nbottom
+
+    transform = tf.random.shuffle(tf.eye(self._n_mesh))
 
     mesh_vertices = tf.gather(x, idx, axis = 2)
     v1 = mesh_vertices[:, :, :, 0, :] - mesh_vertices[:, :, :, 1, :]
     v2 = mesh_vertices[:, :, :, 0, :] - mesh_vertices[:, :, :, 2, :]
     mesh_cross = tf.linalg.cross(v1, v2)
     mesh_area = tf.norm(mesh_cross, axis = -1) / 2
-    # mesh_idx = tf.cast(tf.abs(mesh_area - tf.reduce_max(mesh_area, axis = -1, keepdims = True)) < 1e-20, tf.float32)
-    # mesh_max_num = tf.cast(mesh_idx > 0, tf.float32)
-    # mesh_max_num = tf.expand_dims(tf.reduce_sum(mesh_max_num, axis = -1, keepdims = True), axis = -1)
+    mesh_area = tf.matmul(mesh_area, transform)
     
-    unused_var, mesh_topk = tf.nn.top_k(mesh_area, k = nk)
-    mesh_topk = tf.expand_dims(mesh_topk, axis = 2)
-    mesh_topk = tf.cast(tf.tile(mesh_topk, [1, 1, self._n_mesh, 1]), tf.float32)
-    mesh_idx = tf.cast(tf.abs(mesh_topk - self.mesh_filter) < 0.5, tf.float32)
+    mesh_area_top = tf.cast(mesh_area > tf.reduce_mean(mesh_area, axis = -1, keepdims = True), tf.float32)
+    mesh_top_num = tf.cast(tf.reduce_min(tf.reduce_sum(mesh_area_top, axis = -1)), tf.int32)
+    if ntop > mesh_top_num:
+      ntop = mesh_top_num
+    unused_var, mesh_topk = tf.nn.top_k(mesh_area_top, k = ntop)
 
-    # mesh_idx = tf.argmax(mesh_area, axis = -1)
-    # mesh_idx = tf.expand_dims(mesh_idx, axis = -1)
-    # mesh_idx = tf.tile(mesh_idx, [1, 1, self._n_mesh])
-    # mesh_idx = tf.cast(mesh_idx == self.mesh_filter, tf.float32)
+    if nbottom > 0:
+      mesh_area_bottom = tf.cast(mesh_area < tf.reduce_mean(mesh_area, axis = -1, keepdims = True), tf.float32)
+      mesh_bottom_num = tf.cast(tf.reduce_min(tf.reduce_sum(mesh_area_bottom, axis = -1)), tf.int32)
+      if nbottom > mesh_bottom_num:
+        nbottom = mesh_bottom_num
+      unused_var, mesh_bottomk = tf.nn.top_k(mesh_area_bottom, k = nbottom)
+    
+    # tf.math.reduce_std(mesh_area, axis = -1, keepdims = True)/3)
+
+    mesh_filter = tf.tile(self.mesh_filter, [1, 1, 1, ntop + nbottom])
+    mesh_filter = tf.cast(mesh_filter, tf.float32)
+
+    if nbottom > 0:
+      mesh_k = tf.concat([mesh_topk, mesh_bottomk], axis = -1)
+    else:
+      mesh_k = mesh_topk
+    mesh_k = tf.expand_dims(mesh_k, axis = 2)
+    mesh_k = tf.cast(tf.tile(mesh_k, [1, 1, self._n_mesh, 1]), tf.float32)
+    mesh_idx = tf.cast(tf.abs(mesh_k - mesh_filter) < 0.5, tf.float32)
+    mesh_idx = tf.matmul(transform, mesh_idx)
 
     mesh_idx = tf.expand_dims(tf.expand_dims(mesh_idx, axis = -1), axis = -1)
 

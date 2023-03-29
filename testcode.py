@@ -14,6 +14,6 @@ keras = tf.keras
 # a = tf.reshape(a, [2, 2])
 # print(1/a)
 
-x = tf.constant([[[1, 2, 3, 4], [5, 6, 7, 8]], [[1, 2, 45, 1], [12,2, 5, 3]]])
-z, idx = tf.nn.top_k(x, k = 2)
+x = tf.constant([1, 2])
+z, idx = tf.nn.top_k(x, k = 5)
 print(z, idx)

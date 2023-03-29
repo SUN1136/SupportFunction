@@ -158,8 +158,73 @@ def get_double_sphere(num_points, scale, obj):
 
     return points, example_path
 
+def get_cube_vertex(num_points, scale, obj):
+    points = []
+    for i in range(round(num_points * 0.9)):
+        face = i % 6
+        if face == 0 or face == 1:
+            x = face - 0.5
+            y = np.random.rand() - 0.5
+            z = np.random.rand() - 0.5
+        elif face == 2 or face == 3:
+            x = np.random.rand() - 0.5
+            y = face - 2.5
+            z = np.random.rand() - 0.5
+        elif face == 4 or face == 5:
+            x = np.random.rand() - 0.5
+            y = np.random.rand() - 0.5
+            z = face - 4.5
+        points.append(x)
+        points.append(y)
+        points.append(z)
+    
+    idx2vertex = np.array([[0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, -0.5, -0.5]])
+    for i in range(num_points - round(num_points * 0.9)):
+        idx = i % 8
+        vertex = idx2vertex[idx]
+        points.append(vertex[0])
+        points.append(vertex[1])
+        points.append(vertex[2])
+    points = np.array(points, dtype = np.float32) * scale
+
+    dataset_path = "./dataset"
+    if not tf.io.gfile.isdir(dataset_path):
+        tf.io.gfile.makedirs(dataset_path)
+    example_path = path.join(dataset_path, obj + "-train-data.tfrecords")
+
+    return points, example_path
+
+def get_cube_edge(num_points, scale, obj):
+    idx2edge = np.array([[0.5, 0.5], [0.5, -0.5], [-0.5, 0.5], [-0.5, -0.5]])
+    points = []
+    for i in range(num_points):
+        edge = i % 12
+        if edge < 4:
+            x = np.random.rand() - 0.5
+            y = idx2edge[edge, 0]
+            z = idx2edge[edge, 1]
+        elif edge < 8:
+            y = np.random.rand() - 0.5
+            x = idx2edge[edge-4, 0]
+            z = idx2edge[edge-4, 1]
+        else:
+            z = np.random.rand() - 0.5
+            y = idx2edge[edge-8, 0]
+            x = idx2edge[edge-8, 1]
+        points.append(x)
+        points.append(y)
+        points.append(z)
+    points = np.array(points, dtype = np.float32) * scale
+
+    dataset_path = "./dataset"
+    if not tf.io.gfile.isdir(dataset_path):
+        tf.io.gfile.makedirs(dataset_path)
+    example_path = path.join(dataset_path, obj + "-train-data.tfrecords")
+
+    return points, example_path
+
 def get_points(obj, num_points):
-    func_dict = {"cube":[get_cube, 0.5], "L":[get_L, 1], "sphere":[get_sphere, 0.25], "double_sphere":[get_double_sphere, 0.125]}
+    func_dict = {"cube":[get_cube, 0.5], "L":[get_L, 1], "sphere":[get_sphere, 0.25], "double_sphere":[get_double_sphere, 0.125], "cube_vertex":[get_cube_vertex, 0.5], "cube_edge":[get_cube_edge, 0.5]}
     return func_dict[obj][0](num_points, func_dict[obj][1], obj)
 
 def main():
@@ -167,7 +232,7 @@ def main():
     np.random.seed(45)
 
     num_points = 100000
-    points, example_path = get_points("double_sphere", num_points)
+    points, example_path = get_points("cube_edge", num_points)
 
     write_tfrecord(points, example_path)
 

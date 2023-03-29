@@ -32,8 +32,8 @@ def define_flags():
   
   # Model flags
   flags.DEFINE_string("model", "multiconvex", "Name of the model.")
-  flags.DEFINE_integer("n_parts", 2, "Number of convexes uesd.")
-  flags.DEFINE_integer("n_vertices", 8, "Number of vertices uesd.")
+  flags.DEFINE_integer("n_parts", 3, "Number of convexes uesd.")
+  flags.DEFINE_integer("n_vertices", 10, "Number of vertices uesd.")
   flags.DEFINE_integer("latent_size", 128, "The size of latent code.")
   flags.DEFINE_integer("dims", 3, "The dimension of query points.")
   flags.DEFINE_bool("image_input", False, "Use images as input if True.")
@@ -57,8 +57,9 @@ def define_flags():
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
   flags.DEFINE_integer("sample_point", 1024, "The number of sample points.")
   flags.DEFINE_integer("n_convex_altitude", 31, "The output surface resolution angle degrees.")
-  flags.DEFINE_integer("n_mesh_inter", 10, "The mesh interpolation factor.")
-  flags.DEFINE_integer("n_top_k", 10, "The number of meshes for top k sampling.")
+  flags.DEFINE_integer("n_mesh_inter", 5, "The mesh interpolation factor.")
+  flags.DEFINE_integer("n_top_k", 50, "The number of meshes for top k sampling.")
+  flags.DEFINE_integer("n_bottom_k", 0, "The number of meshes for bottom k sampling.")
   flags.mark_flag_as_required("train_dir")
 
   # Eval flags

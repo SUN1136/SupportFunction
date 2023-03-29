@@ -37,7 +37,7 @@ def main(unused_argv):
   optimizer = tf.train.AdamOptimizer(FLAGS.lr)
 
   # Set up the graph
-  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm = model.compute_loss(
+  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points = model.compute_loss(
       batch, training=True, optimizer=optimizer)
 
   # Training hooks
@@ -63,8 +63,8 @@ def main(unused_argv):
       max_wait_secs=3600) as mon_sess:
 
     while not mon_sess.should_stop():
-      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var = mon_sess.run(
-        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm])
+      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var = mon_sess.run(
+        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points])
       if step_var % log_count == 0:
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
         print("Smoothness: ", smooth_var[0, :])
@@ -76,6 +76,7 @@ def main(unused_argv):
         # locvert_var = locvert_var[0, ...].reshape(-1, 3)
         # dhdz_var = dhdz_var[0, ...].reshape(-1, dhdz_var.shape[-1])
         # zm_var = zm_var[0, ...].reshape(-1, zm_var.shape[-1])
+        points_var = points_var[0, ...]
         with tf.io.gfile.GFile(path.join(FLAGS.train_dir, "stats.csv"), "w") as fout:
           fout.write("x,y,z\n")
           for i in range(out_var.shape[0]):
@@ -101,6 +102,9 @@ def main(unused_argv):
           # fout.write("zm\n")
           # for i in range(zm_var.shape[0]):
           #   fout.write("{0},{1},{2}\n".format(zm_var[i, 0], zm_var[i, 1], zm_var[i, 2]))
+          fout.write("dataset\n")
+          for i in range(points_var.shape[0]):
+            fout.write("{0},{1},{2}\n".format(points_var[i, 0], points_var[i, 1], points_var[i, 2]))
 
 
 if __name__ == "__main__":
