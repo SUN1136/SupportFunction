@@ -46,6 +46,8 @@ class MultiConvexNet(keras.Model):
 
     self._batch_size = args.batch_size
 
+    self._useS = args.use_surface_sampling
+
     # Params = Roundness + Translation + Hyperplanes
     self.n_params = self._n_parts * (self._dims * self._n_vertices) + self._n_parts
 
@@ -54,7 +56,7 @@ class MultiConvexNet(keras.Model):
       self.beta_decoder = Decoder(self.n_params)
 
     with tf.variable_scope("mc_convex"):
-      self.cvx = ConvexSurfaceSampler(args.dims, args.n_parts, args.n_convex_altitude, args.n_mesh_inter, args.n_top_k, args.n_bottom_k)
+      self.cvx = ConvexSurfaceSampler(args.dims, args.n_parts, args.n_convex_altitude, args.n_mesh_inter, args.n_top_k, args.n_bottom_k, args.use_surface_sampling)
 
   def compute_loss(self, batch, training, optimizer=None):
     """Compute loss given a batch of data.
@@ -75,11 +77,16 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
     
-    out_points, vertices, smoothness, direc, locvert, dhdz, zm = self.decode(beta, training=training)
+    out_points, direction_h, trans, vertices, smoothness, direc, locvert, dhdz, zm = self.decode(beta, training=training)
 
-    out2in = self._compute_sample_loss(points, out_points)
-    in2out = self._compute_sample_loss(out_points, points)
-    loss = out2in + in2out
+    if self._useS:
+      out2in = self._compute_sample_loss(points, out_points)
+      in2out = self._compute_sample_loss(out_points, points)
+      loss = out2in + in2out
+    else:
+      h_loss = self._compute_h_loss(points, direction_h, trans)
+      s_loss = self._compute_sample_loss(points, out_points)
+      loss = h_loss + s_loss
 
     if training:
       tf.summary.scalar("loss", loss)
@@ -132,8 +139,8 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, dims], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direc, locvert, dhdz, zm = self.cvx(vertices, smoothness)
-    return out_points, vertices, smoothness, direc, locvert, dhdz, zm
+    out_points, direction_h, trans, direc, locvert, dhdz, zm = self.cvx(vertices, smoothness)
+    return out_points, direction_h, trans, vertices, smoothness, direc, locvert, dhdz, zm
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -153,7 +160,7 @@ class MultiConvexNet(keras.Model):
     # mask = tf.ones(tf.shape(p)) * 1e-20
     # p = tf.where(tf.is_nan(p), mask, p)
     p = (tf.tanh(smoothness) + 1) * max_p / 2 + 2
-    # p = tf.nn.sigmoid(smoothness) * 10 + 1
+    # p = tf.nn.sigmoid(smoothness) * max_p + 1
     return vert, p
 
   def _compute_sample_loss(self, gt, output):
@@ -167,6 +174,48 @@ class MultiConvexNet(keras.Model):
     sample_loss = tf.reduce_min(distances, axis = 2)
     sample_loss = tf.reduce_mean(sample_loss)
     return sample_loss
+  
+  def _compute_h_loss(self, gt, output, translations):
+    gt_points = tf.expand_dims(gt, axis = 2)
+    gt_points = tf.tile(gt_points, [1, 1, tf.shape(translations)[1], 1])
+    trans = tf.expand_dims(translations, axis = 1)
+    trans = tf.tile(trans, [1, tf.shape(gt_points)[1], 1, 1])
+
+    gt_local = gt_points - trans
+    gt_local = tf.transpose(gt_local, [0, 2, 1, 3])
+
+    out_points = output[:, :, :, 0:3]
+    out_points = tf.transpose(out_points, [0, 1, 3, 2])
+
+    dot = tf.matmul(gt_local, out_points)
+    dot = tf.transpose(dot, [0, 2, 1, 3])
+    
+    h = output[:, :, :, 3]
+    h = tf.expand_dims(h, axis = 1)
+    h = tf.tile(h, [1, tf.shape(dot)[1], 1, 1])
+
+    outsurf = dot - h
+    outsurf = outsurf * tf.cast(outsurf > 0, tf.float32)
+    # outsurf = tf.clip_by_value(outsurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(outsurf < 1e-10, tf.float32)*1e-10
+    outsurf = tf.pow(outsurf, 2)
+    outsurf = tf.reduce_max(outsurf, axis = -1)
+    outsurf = tf.reduce_min(outsurf, axis = -1)
+
+    insurf = h - dot
+
+    isin = tf.cast(insurf >= 0, tf.float32)
+    isin = tf.reduce_min(isin, axis = -1)
+    
+    insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
+    # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
+    insurf = tf.pow(insurf, 2)
+    insurf = tf.reduce_min(insurf, axis = -1)
+
+    insurf = insurf * isin
+    insurf = tf.reduce_max(insurf, axis = -1)
+
+    h_loss = tf.reduce_mean(outsurf + 10*insurf)
+    return h_loss
 
 
 
@@ -174,8 +223,10 @@ class MultiConvexNet(keras.Model):
 class ConvexSurfaceSampler(keras.layers.Layer):
   """Differentiable shape rendering layer using multiple convex polytopes."""
 
-  def __init__(self, dims, n_parts, n_th1, n_mesh_inter, ntop, nbottom):
+  def __init__(self, dims, n_parts, n_th1, n_mesh_inter, ntop, nbottom, useS = True):
     super(ConvexSurfaceSampler, self).__init__()
+
+    self._useS = useS
 
     self._dims = dims
     self._n_parts = n_parts
@@ -269,9 +320,76 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     mean_vertices = tf.reduce_mean(vertices, axis = 2, keepdims = True)
     local_vertices = vertices - mean_vertices
 
-    points, dhdz, zm = self._compute_spt(self.directions, self.mesh_idx, local_vertices, smoothness, mean_vertices)
+    if self._useS:
+      points, dhdz, zm = self._compute_spt(self.directions, self.mesh_idx, local_vertices, smoothness, mean_vertices)
+      direction_h = tf.zeros([1, 1, 1, 1])
+    else:
+      direction_h, points = self._compute_h(self.directions, local_vertices, smoothness, mean_vertices)
+      mean_vertices = tf.reshape(mean_vertices, [tf.shape(mean_vertices)[0], tf.shape(mean_vertices)[1], tf.shape(mean_vertices)[-1]])
+      dhdz = tf.zeros([1, 1, 1, 1])
+      zm = tf.zeros([1, 1, 1, 1])
 
-    return points, self.directions, local_vertices, dhdz, zm
+    return points, direction_h, mean_vertices, self.directions, local_vertices, dhdz, zm
+
+  def _compute_h(self, x, vertices, smoothness, translations):
+    """Compute support function h(x).
+
+    Args:
+      x: Tensor, [n_direction, dims], direction samples.
+      vertices: Tensor, [batch_size, n_parts, n_vertices, dims], convex local vertices.
+      smoothness: Tensor, [batch_size, n_parts], convex smoothness.
+      translations: Tensor, [batch_size, n_parts, 1, dims], convex centers.
+
+    Returns:
+      direction_h: Tensor, [batch_size, n_directions, dims + 1], global directions and h(x).
+    """
+    local_directions = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
+    local_directions = tf.tile(local_directions, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
+
+    x = tf.transpose(x, [1, 0])
+    x = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
+    x = tf.tile(x, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
+
+    "z: Tensor, [batch_size, n_parts, n_vertices, n_out_points], dot product of v and x"
+    z = tf.matmul(vertices, x)
+    zm = tf.cast(z > 0, tf.float32) * z
+
+    n_v = tf.shape(zm)[2]
+    n_d = tf.shape(zm)[3]
+
+    p = tf.expand_dims(tf.expand_dims(smoothness, axis = -1), axis = -1)
+    p1 = tf.tile(p, [1, 1, n_v, n_d])
+    p2 = tf.tile(p, [1, 1, 1, n_d])
+
+    zm_log = tf.log(zm) / tf.log(10.0)
+    zm_log = tf.reduce_max(zm_log, axis = 2, keepdims = True)
+    exponent = zm_log * p2
+    lk = tf.cast(exponent < self._lb_exponent, tf.float32) * ((self._lb_exponent - exponent) / p2)
+    k = tf.clip_by_value(tf.ceil(lk), clip_value_min = 0, clip_value_max = self._ub)
+    base = tf.ones(tf.shape(k)) * 10.0
+    k = tf.pow(base, k)
+    k2 = k
+    k = tf.tile(k, [1, 1, n_v, 1])
+
+    zm = zm * k
+
+    zm_p = tf.clip_by_value(tf.pow(zm, p1), clip_value_min = self._lb, clip_value_max = self._ub) - tf.cast(zm == 0, tf.float32) * self._lb
+    sum_zm_p = tf.reduce_sum(zm_p, axis = 2, keepdims = True)
+    h = tf.clip_by_value(tf.pow(sum_zm_p, 1 / p2), clip_value_min = self._lb, clip_value_max = self._ub)
+    sum_zm = tf.tile(h, [1, 1, n_v, 1])
+    h = h / k2
+    h = tf.transpose(h, [0, 1, 3, 2])
+
+    direction_h = tf.concat([local_directions, h], axis = -1)
+    
+    dhdz = tf.clip_by_value(tf.pow((zm / sum_zm), (p1 - 1)), clip_value_min = self._lb, clip_value_max = self._ub)
+    dhdz_t = tf.transpose(dhdz, [0, 1, 3, 2])
+    dhdx = tf.matmul(dhdz_t, vertices)
+
+    surf_points = dhdx + translations
+    surf_points = tf.reshape(surf_points, [tf.shape(surf_points)[0], -1, tf.shape(surf_points)[-1]])
+
+    return direction_h, surf_points
 
   def _compute_spt(self, x, mesh_idx, vertices, smoothness, translations):
     """Compute support function and surface point samples.

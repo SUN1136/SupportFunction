@@ -14,6 +14,7 @@ keras = tf.keras
 # a = tf.reshape(a, [2, 2])
 # print(1/a)
 
-x = tf.constant([1, 2])
-z, idx = tf.nn.top_k(x, k = 5)
-print(z, idx)
+x = tf.constant([[1, 2], [-4, 1]])
+y = tf.pow(10.0, -40)
+
+print(tf.shape(x), y)
