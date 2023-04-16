@@ -4,6 +4,8 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow.compat.v1 as tf
+import tensorflow as tf2
+import os
 keras = tf.keras
 
 # x = keras.Sequential()
@@ -14,7 +16,18 @@ keras = tf.keras
 # a = tf.reshape(a, [2, 2])
 # print(1/a)
 
-x = tf.constant([[1, 2], [-4, 1]])
-y = tf.pow(10.0, -40)
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+# gpus = tf2.config.experimental.list_physical_devices('GPU')
+# if gpus:
+#     try:
+#         # memory limit 10 times increased
+#         tf2.config.experimental.set_virtual_device_configuration(gpus[0], [tf2.config.experimental.VirtualDeviceConfiguration(memory_limit=100000)])
+#         # tf.config.experimental.set_memory_growth(gpus[0], True)
+#         print("\n----------GPU Loaded----------\n")
+#     except RuntimeError as e:
+#         print(e)
 
-print(tf.shape(x), y)
+x = 1e-6
+y = 0e-6
+print(x+1)
+print(y+1)
