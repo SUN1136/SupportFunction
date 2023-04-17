@@ -35,7 +35,7 @@ def define_flags():
   flags.DEFINE_integer("n_parts", 2, "Number of convexes uesd.")
   flags.DEFINE_integer("n_vertices", 10, "Number of vertices uesd.")
   flags.DEFINE_integer("latent_size", 128, "The size of latent code.")
-  flags.DEFINE_integer("dims", 3, "The dimension of query points.")
+  # flags.DEFINE_integer("dims", 3, "The dimension of query points.")
   flags.DEFINE_bool("image_input", False, "Use images as input if True.")
   flags.DEFINE_float("vis_scale", 1.3,
                      "Scale of bbox used when extracting meshes.")
@@ -57,10 +57,10 @@ def define_flags():
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
   flags.DEFINE_integer("sample_point", 1024, "The number of sample points.")
   flags.DEFINE_integer("n_convex_altitude", 31, "The output surface resolution angle degrees.")
-  flags.DEFINE_integer("n_mesh_inter", 5, "The mesh interpolation factor.")
-  flags.DEFINE_integer("n_top_k", 50, "The number of meshes for top k sampling.")
-  flags.DEFINE_integer("n_bottom_k", 0, "The number of meshes for bottom k sampling.")
-  flags.DEFINE_bool("use_surface_sampling", False, "Use surface sampling points for training.")
+  # flags.DEFINE_integer("n_mesh_inter", 5, "The mesh interpolation factor.")
+  # flags.DEFINE_integer("n_top_k", 50, "The number of meshes for top k sampling.")
+  # flags.DEFINE_integer("n_bottom_k", 0, "The number of meshes for bottom k sampling.")
+  # flags.DEFINE_bool("use_surface_sampling", False, "Use surface sampling points for training.")
   flags.mark_flag_as_required("train_dir")
 
   # Eval flags

@@ -27,7 +27,5 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-x = 1e-6
-y = 0e-6
-print(x+1)
-print(y+1)
+a = tf.zeros((2, 3, 4, 5, 6))
+print(tf.shape(tf.reduce_min(a, axis = [-2, -1], keepdims = True)))

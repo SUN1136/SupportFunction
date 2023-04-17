@@ -40,7 +40,7 @@ def shapenet(split, args):
   data_dir = args.data_dir
   sample_point = args.sample_point
   batch_size = args.batch_size if split == "train" else 1
-  dims = args.dims
+  dims = 3
 
   def _parser(example):
     fs = tf.parse_single_example(
