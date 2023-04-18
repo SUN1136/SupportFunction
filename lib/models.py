@@ -77,7 +77,7 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
     
-    out_points, direction_h, trans, vertices, smoothness, direc, locvert, dhdz, zm = self.decode(beta, training=training)
+    out_points, direction_h, overlap, trans, vertices, smoothness, direc, locvert, dhdz, zm = self.decode(beta, training=training)
 
     # if self._useS:
     #   out2in = self._compute_sample_loss(points, out_points)
@@ -86,7 +86,9 @@ class MultiConvexNet(keras.Model):
     # else:
     h_loss = self._compute_h_loss(points, direction_h, trans)
     s_loss = self._compute_sample_loss(points, out_points)
-    loss = h_loss + s_loss
+    overlap_loss = self._compute_overlap_loss(overlap)
+
+    loss = h_loss + s_loss + 0.1*overlap_loss
 
     if training:
       tf.summary.scalar("loss", loss)
@@ -107,7 +109,7 @@ class MultiConvexNet(keras.Model):
         gradients, unused_var = tf.clip_by_global_norm(gradients, 5.0)
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
-      return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm, points
+      return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm, points, overlap
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -139,8 +141,8 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, 3], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direction_h, trans, direc, locvert, dhdz, zm = self.cvx(vertices, smoothness)
-    return out_points, direction_h, trans, vertices, smoothness, direc, locvert, dhdz, zm
+    out_points, direction_h, overlap, trans, direc, locvert, dhdz, zm = self.cvx(vertices, smoothness)
+    return out_points, direction_h, overlap, trans, vertices, smoothness, direc, locvert, dhdz, zm
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -216,6 +218,11 @@ class MultiConvexNet(keras.Model):
 
     h_loss = tf.reduce_mean(outsurf + 10*insurf)
     return h_loss
+  
+  def _compute_overlap_loss(self, overlap):
+    overlap_loss = overlap - 0.75
+    overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
+    return overlap_loss
 
 
 
@@ -324,12 +331,12 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     #   points, dhdz, zm = self._compute_spt(self.directions, self.mesh_idx, local_vertices, smoothness, mean_vertices)
     #   direction_h = tf.zeros([1, 1, 1, 1])
     # else:
-    direction_h, points = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices)
+    direction_h, points, overlap = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices)
     mean_vertices = tf.reshape(mean_vertices, [tf.shape(mean_vertices)[0], tf.shape(mean_vertices)[1], tf.shape(mean_vertices)[-1]])
     dhdz = tf.zeros([1, 1, 1, 1])
     zm = tf.zeros([1, 1, 1, 1])
 
-    return points, direction_h, mean_vertices, self.directions, local_vertices, dhdz, zm
+    return points, direction_h, overlap, mean_vertices, self.directions, local_vertices, dhdz, zm
 
   def _compute_output(self, x, vertices, smoothness, translations):
     """Compute output.
@@ -358,7 +365,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
     overlap = self._compute_overlap(vertices, smoothness, translations)
 
-    return direction_h, surf_points
+    return direction_h, surf_points, overlap
   
   def _compute_spt(self, x, vertices, smoothness, translations, get_h = True, get_dsdx = False):
     """Compute output.
@@ -424,22 +431,22 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       zm_p_1 = tf.transpose(zm_p_1, [0, 1, 3, 2])
       mat_zm_p_1 = tf.matmul(tf.expand_dims(zm_p_1, axis = -1), tf.expand_dims(zm_p_1, axis = -2))
       
-      dsdx = diag_zm_p_2 - (mat_zm_p_1 / tf.expand_dims(tf.transpose(sum_zm_p, [0, 1, 3, 2]), axis = -1))
+      dsdx = diag_zm_p_2 - tf.clip_by_value(mat_zm_p_1 / tf.expand_dims(tf.transpose(sum_zm_p, [0, 1, 3, 2]), axis = -1), clip_value_min = 0.0, clip_value_max = self._ub)
 
       v_left = tf.tile(tf.expand_dims(tf.transpose(vertices, [0, 1, 3, 2]), axis = 2), [1, 1, n_d, 1, 1])
       v_right = tf.tile(tf.expand_dims(vertices, axis = 2), [1, 1, n_d, 1, 1])
 
       dsdx = tf.matmul(tf.matmul(v_left, dsdx), v_right)
 
-      sum_zm_1 = tf.clip_by_value(tf.pow(sum_zm_p, 1 / p2 - 1), clip_value_min = self._lb, clip_value_max = self._ub)
+      sum_zm_1 = tf.clip_by_value(tf.pow(sum_zm_p, 1 / p2 - 1), clip_value_min = 0.0, clip_value_max = self._ub)
       sum_zm_1 = tf.expand_dims(tf.transpose(sum_zm_1, [0, 1, 3, 2]), axis = -1)
       p3 = tf.expand_dims(tf.expand_dims(tf.expand_dims(smoothness, axis = -1), axis = -1), axis = -1)
       k3 = tf.expand_dims(tf.transpose(k2, [0, 1, 3, 2]), axis = -1)
 
-      dsdx = (p3 - 1.0) * k3 * sum_zm_1 * dsdx
+      dsdx = tf.clip_by_value((p3 - 1.0) * k3 * sum_zm_1 * dsdx, clip_value_min = -self._ub, clip_value_max = self._ub)
 
       if get_h:
-        h = h / k2
+        h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
         h = tf.transpose(h, [0, 1, 3, 2])
         return h, surf_points, dsdx
       else:
@@ -447,7 +454,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       
     else:
       if get_h:
-        h = h / k2
+        h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
         h = tf.transpose(h, [0, 1, 3, 2])
         return h, surf_points
       else:
@@ -462,95 +469,154 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       translations: Tensor, [batch_size, n_parts, 1, 3], convex centers.
 
     Returns:
-      overlap: Tensor, [batch_size, n_parts, n_parts], convex overlapping state.
+      overlap: Tensor, [batch_size, n_parts, 1], convex minimum growth rate.
     """
-    n_c = tf.shape(vertices)[1]
-    u0 = tf.tile(tf.reshape(tf.constant([1.0, 1.0, 1.0]), [1, 1, 3, 1]), [tf.shape(vertices)[0], n_c, 1, 1])
-    W_filter = tf.reshape(tf.constant([0, 1, 2, 3]), [1, 1, 4])
+    n_c = self._n_parts
+    # u0 = tf.tile(tf.reshape(tf.constant([1.0, 1.0, 1.0]), [1, 1, 3, 1]), [tf.shape(vertices)[0], n_c, 1, 1])
+    # W_filter = tf.reshape(tf.constant([0, 1, 2, 3]), [1, 1, 4])
+    overlap_list = []
 
-    for i in range(n_c):
-      i_v = tf.tile(vertices[:, i:(i+1), :, :], [1, n_c, 1, 1])
-      i_p = tf.tile(smoothness[:, i:(i+1)], [1, n_c])
-      i_t = tf.tile(translations[:, i:(i+1), :, :], [1, n_c, 1, 1])
+    for i in range(n_c - 1):
+      n_jc = n_c - 1 - i
+      i_v = tf.tile(vertices[:, i:(i+1), :, :], [1, n_jc, 1, 1])
+      i_p = tf.tile(smoothness[:, i:(i+1)], [1, n_jc])
+      i_t = tf.tile(translations[:, i:(i+1), :, :], [1, n_jc, 1, 1])
 
-      o_bar = translations - translations[:, i:(i+1), :, :]
-      s_bar = 0.0
-      o_bar2 = tf.tile(tf.expand_dims(tf.transpose(o_bar, [0, 1, 3, 2]), axis = 2), [1, 1, 4, 1, 1])
-
-      u_ie = 0.0
-
-      V_ie = tf.constant([[1.0, 0.0, -0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5], [0.0, 0.0, 1.0]])
-      V_ie = tf.tile(tf.reshape(V_ie, [1, 1, 3, 4]), [tf.shape(vertices)[0], n_c, 1, 1])
-      W_ie = tf.tile(tf.zeros([1, 1, 4, 3, 3]), [tf.shape(vertices)[0], n_c, 1, 1, 1])
+      j_v = vertices[:, i+1:, :, :]
+      j_p = smoothness[:, i+1:]
+      j_t = translations[:, i+1:, :, :]
 
 
-      "IE Initialization"
-      iter = 0
-      for j in range(10):
-        iter += 1
-        W_ie_0 = tf.expand_dims(tf.concat([V_ie[:, :, :, 1:2], V_ie[:, :, :, 2:3], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
-        W_ie_1 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 2:3], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
-        W_ie_2 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 1:2], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
-        W_ie_3 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 1:2], V_ie[:, :, :, 2:3]], axis = -1), axis = 2)
-        W_ie =  tf.concat([W_ie_0, W_ie_1, W_ie_2, W_ie_3], axis = 2)
+      o_bar = j_t - translations[:, i:(i+1), :, :]
+      # s_bar = 0.0
+      # o_bar2 = tf.tile(tf.expand_dims(tf.transpose(o_bar, [0, 1, 3, 2]), axis = 2), [1, 1, 4, 1, 1])
 
-        W_inv_ie = tf.linalg.inv(W_ie)
+      u_ie = o_bar / self._safe_norm(o_bar, axis = -1, keepdims = True)
 
-        c_ie = tf.matmul(W_inv_ie, o_bar2)
-        c_nan = tf.math.is_nan(c_ie)
-        large = 1e+20 * tf.ones(tf.shape(c_ie))
-        c_ie = tf.where(c_nan, large, c_ie)
 
-        min_c = tf.cast(tf.reduce_min(c_ie, axis = [-2, -1]) >= 0, tf.float32)
-        unused_var, max_W_idx = tf.nn.top_k(min_c, k = 1)
-        max_W_idx = tf.tile(max_W_idx, [1, 1, 4])
-        max_W_idx = tf.expand_dims(tf.expand_dims(tf.cast(max_W_idx == W_filter, tf.float32), axis = -1), axis = -1)
-        max_W_inv = W_inv_ie * max_W_idx
-        max_W_inv = tf.reduce_sum(max_W_inv, axis = 2)
-        max_W = W_ie * max_W_idx
-        max_W = tf.reduce_sum(max_W, axis = 2)
+      # "IE Initialization"
+      # V_ie = 1e-3 * tf.constant([[1.0, 0.0, -0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5], [0.0, 0.0, 1.0]])
+      # V_ie = tf.tile(tf.reshape(V_ie, [1, 1, 3, 4]), [tf.shape(vertices)[0], n_c, 1, 1])
+      # W_ie = tf.tile(tf.zeros([1, 1, 4, 3, 3]), [tf.shape(vertices)[0], n_c, 1, 1, 1])
 
-        u_ie = tf.matmul(tf.transpose(max_W_inv, [0, 1, 3, 2]), u0)
-        u_norm = tf.norm(u_ie, axis = [-2, -1], keepdims = True)
-        u_ie = tf.transpose(u_ie / u_norm, [0, 1, 3, 2])
+      # iter = 0
+      # for j in range(10):
+      #   iter += 1
+      #   W_ie_0 = tf.expand_dims(tf.concat([V_ie[:, :, :, 1:2], V_ie[:, :, :, 2:3], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
+      #   W_ie_1 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 2:3], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
+      #   W_ie_2 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 1:2], V_ie[:, :, :, 3:4]], axis = -1), axis = 2)
+      #   W_ie_3 = tf.expand_dims(tf.concat([V_ie[:, :, :, 0:1], V_ie[:, :, :, 1:2], V_ie[:, :, :, 2:3]], axis = -1), axis = 2)
+      #   W_ie =  tf.concat([W_ie_0, W_ie_1, W_ie_2, W_ie_3], axis = 2)
 
-        s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
-        s2 = self._compute_spt(-u_ie, vertices, smoothness, translations, get_h=False)
-        s_bar = s2 - s1
+      #   try:
+      #     W_inv_ie = tf.linalg.inv(W_ie)
+      #   except:
+      #     continue
 
-        V_ie = tf.concat([max_W, tf.transpose(o_bar - s_bar, [0, 1, 3, 2])], axis = -1)
+      #   c_ie = tf.matmul(W_inv_ie, o_bar2)
+      #   # c_nan = tf.math.is_nan(c_ie)
+      #   # large = 1e+20 * tf.ones(tf.shape(c_ie))
+      #   # c_ie = tf.where(c_nan, large, c_ie)
+
+      #   min_c = tf.cast(tf.reduce_min(c_ie, axis = [-2, -1]) >= 0, tf.float32)
+      #   unused_var, max_W_idx = tf.nn.top_k(min_c, k = 1)
+      #   max_W_idx = tf.tile(max_W_idx, [1, 1, 4])
+      #   max_W_idx = tf.expand_dims(tf.expand_dims(tf.cast(max_W_idx == W_filter, tf.float32), axis = -1), axis = -1)
+      #   max_W_inv = W_inv_ie * max_W_idx
+      #   max_W_inv = tf.reduce_sum(max_W_inv, axis = 2)
+      #   max_W = W_ie * max_W_idx
+      #   max_W = tf.reduce_sum(max_W, axis = 2)
+
+      #   u_ie = tf.matmul(tf.transpose(max_W_inv, [0, 1, 3, 2]), u0)
+      #   u_norm = tf.norm(u_ie, axis = [-2, -1], keepdims = True)
+      #   u_ie = tf.transpose(u_ie / u_norm, [0, 1, 3, 2])
+
+      #   s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
+      #   s2 = self._compute_spt(-u_ie, vertices, smoothness, translations, get_h=False)
+      #   s_bar = s2 - s1
+
+      #   V_ie = tf.concat([max_W, tf.transpose(o_bar - s_bar, [0, 1, 3, 2])], axis = -1)
 
       
+      s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
+      s2 = self._compute_spt(-u_ie, j_v, j_p, j_t, get_h=False)
+      s_bar = s2 - s1
+
       "Growth Model"
-      sig = tf.norm(o_bar, axis = -1) / tf.norm(o_bar - s_bar, axis = -1)
-      sig_nan = tf.math.is_nan(sig)
-      large = 1e+20 * tf.ones(tf.shape(sig))
-      sig = tf.where(sig_nan, large, sig)
+      sig = tf.clip_by_value(self._safe_norm(o_bar, axis = -1) / self._safe_norm(o_bar - s_bar, axis = -1), clip_value_min = 0.0, clip_value_max = self._ub)
       var = tf.concat([tf.squeeze(u_ie, axis = 2), sig], axis = -1)
 
-      tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], tf.shape(vertices)[1]))
-      rho = tf.zeros((tf.shape(vertices)[0], tf.shape(vertices)[1]))
+      tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], n_jc, 4, 1))
       iter = 0
 
-      for j in range(10):
+      noninvertible = False
+      for j in range(20):
         iter += iter
-        f, jac = self._residual(o_bar, i_v, i_p, i_t, vertices, smoothness, translations, var)
-        res = tf.norm(f, axis = -1)
+        f, jac = self._residual(o_bar, i_v, i_p, i_t, j_v, j_p, j_t, var)
+        res = self._safe_norm(f, axis = -1)
+
+        # jac_nan = tf.cast(tf.math.is_nan(tf.linalg.inv(jac)), tf.float32)
+        # jac_nan = tf.reduce_max(jac_nan)
+        # if jac_nan == 1.0 or noninvertible:
+        #   noninvertible = True
+        #   continue
+        # else:
+        #   noninvertible = False
+
+        try:
+          jac_inv = tf.linalg.inv(jac)
+          noninvertible = False
+        except:
+          noninvertible = True
+          continue
 
         if tf.reduce_max(res) < 1e-6:
-            break
-        
-        dN = -tf.matmul(tf.linalg.inv(jac), f)
-        grad = tf.matmul(tf.transpose(jac, [0, 1, 3, 2]), f)
-        dC = - tf.norm(grad, axis = [-2, -1], keepdims = True)*tf.norm(grad, axis = [-2, -1], keepdims = True) / (tf.norm(tf.matmul(jac, grad), axis = [-2, -1], keepdims = True)*tf.norm(tf.matmul(jac, grad), axis = [-2, -1], keepdims = True)) * grad
-        dD = self._dogleg(dN, dC, tr_radius)
+          dN = -tf.matmul(tf.linalg.inv(jac), f)
+          grad = tf.matmul(tf.transpose(jac, [0, 1, 3, 2]), f)
+          dC = - tf.clip_by_value(tf.reduce_sum(grad*grad, axis = [-2, -1], keepdims = True) / tf.reduce_sum(tf.matmul(jac, grad)*tf.matmul(jac, grad), axis = [-2, -1], keepdims = True), clip_value_min = 0.0, clip_value_max = self._ub) * grad
+          dD = self._dogleg(dN, dC, tr_radius)
+
+          f_next = self._residual(o_bar, i_v, i_p, i_t, j_v, j_p, j_t, var + tf.squeeze(dD, axis = -1), get_jac = False)
+
+          actual_red = tf.expand_dims((tf.reduce_sum(f*f, axis = [-2, -1]) - tf.reduce_sum(f_next*f_next, axis = [-2, -1])), axis = -1) / 2.0
+          predict_red = -tf.matmul(tf.transpose(grad, [0, 1, 3, 2]), dD) - tf.expand_dims(tf.expand_dims(tf.reduce_sum(tf.matmul(jac, dD)*tf.matmul(jac, dD), axis = [-2, -1]), axis = -1), axis = -1) / 2.0
+          predict_red = tf.squeeze(predict_red, axis = -1)
+
+          red_filter = predict_red == 0.0
+          rho = tf.clip_by_value(actual_red / predict_red, clip_value_min = 0.0, clip_value_max = self._ub)
+
+          large_rho = 1e+10 * tf.ones(tf.shape(rho))
+          rho = tf.tile(tf.expand_dims(tf.where(red_filter, large_rho, rho), axis = -1), [1, 1, 4, 1])
+
+          tr_filter1 = rho < 0.05
+          tr_filter2 = rho > 0.9
+          dD_norm = tf.tile(self._safe_norm(dD, axis = [-2, -1], keepdims = True), [1, 1, 4, 1])
+
+          tr_radius = tf.where(tr_filter1, 0.25*dD_norm, tr_radius)
+          tr_radius = tf.where(tr_filter2, tf.reduce_max(tf.concat([tr_radius, dD_norm], axis = -1), axis = -1, keepdims = True), tr_radius)
+
+          var_filter = tf.squeeze(rho, axis = -1) > 0.05
+          var = tf.where(var_filter, var + tf.squeeze(dD, axis = -1), var)
+
+        else:
+          continue
+
+      
+      "Record Growth Ratio"
+      f = self._residual(o_bar, i_v, i_p, i_t, j_v, j_p, j_t, var, get_jac = False)
+      sigma = tf.reduce_min(var[:, :, 3:4], axis = 1, keepdims = True)
+
+      if noninvertible:
+        sigma = tf.ones(tf.shape(sigma)) * 0.9
+
+      overlap_list.append(sigma)
 
 
-    overlap = 0
-
+    "End of Loop"
+    overlap = tf.concat(overlap_list, axis = 1)
     return overlap
   
-  def _residual(self, o_bar, i_v, i_p, i_t, vertices, smoothness, translations, var):
+  def _residual(self, o_bar, i_v, i_p, i_t, vertices, smoothness, translations, var, get_jac = True):
     x = tf.expand_dims(var[:, :, :3], axis = 2)
     
     s1, dsdx1 = self._compute_spt(x, i_v, i_p, i_t, get_h=False, get_dsdx=True)
@@ -559,15 +625,33 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     f = tf.concat([(var[:, :, 3:4]*tf.squeeze(s1 - s2, axis = 2) + (1 - var[:, :, 3:4])*tf.squeeze(-o_bar, axis = 2)), (tf.expand_dims(tf.reduce_sum(x*x, axis = [2, 3]), axis = -1))], axis = -1)
     f = tf.expand_dims(f, axis = -1)
 
-    jac = tf.expand_dims(var[:, :, 3:4], axis = -1) * tf.squeeze(dsdx1 + dsdx2, axis = 2)
-    jac = tf.concat([jac, tf.transpose(s1 - s2 + o_bar, [0, 1, 3, 2])], axis = -1)
-    jac = tf.concat([jac, tf.concat([2.0*x, tf.zeros((tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1))], axis = -1)], axis = -2)
-
-    return f, jac
+    if get_jac:
+      jac = tf.expand_dims(var[:, :, 3:4], axis = -1) * tf.squeeze(dsdx1 + dsdx2, axis = 2)
+      jac = tf.concat([jac, tf.transpose(s1 - s2 + o_bar, [0, 1, 3, 2])], axis = -1)
+      jac = tf.concat([jac, tf.concat([2.0*x, tf.zeros((tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1))], axis = -1)], axis = -2)
+      return f, jac
+    else:
+      return f
   
   def _dogleg(self, dN, dC, tr_radius):
-    dD = 0
+    dN_filter = tf.cast(self._safe_norm(dN, axis = [-2, -1], keepdims = True) < tr_radius, tf.float32)
+    dC_filter = tf.cast(self._safe_norm(dC, axis = [-2, -1], keepdims = True) > tr_radius, tf.float32)
+
+    a = self._safe_norm(dN - dC, axis = [-2, -1], keepdims = True)
+    a = a*a
+    b = tf.matmul(tf.transpose(dC, [0, 1, 3, 2]), dN - dC)
+    c = b*b - a*(tf.reduce_sum(dC*dC, axis = [-2, -1], keepdims = True) - tr_radius*tr_radius)
+    tau = tf.clip_by_value((-b + tf.sqrt(c + 1e-20)) / a, clip_value_min = 0.0, clip_value_max = self._ub)
+
+    dD = dN_filter * dN
+    dD += tf.cast((1.0 - dN_filter) == dC_filter, tf.float32) * tf.clip_by_value(dC / self._safe_norm(dC, axis = [-2, -1], keepdims = True), clip_value_min = -self._ub, clip_value_max = self._ub)
+    dD += tf.cast((1.0 - dN_filter) == (1.0 - dC_filter), tf.float32) * (dC + tau*(dN - dC))
+
     return dD
+  
+  def _safe_norm(self, x, axis, keepdims = False):
+    norm = tf.sqrt(tf.reduce_sum(x*x, axis = axis, keepdims = keepdims) + 1e-20)
+    return norm
 
   # def _compute_spt(self, x, mesh_idx, vertices, smoothness, translations):
   #   """Compute support function and surface point samples.

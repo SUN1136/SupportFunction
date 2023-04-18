@@ -53,7 +53,7 @@ def residual(obj, idx1, idx2, var):
     f[3] = np.sum(var[:3]**2) - 1
 
     jac = np.zeros((4, 4))
-    jac[:3, 3] = s1 - s2 - o1 + o2
+    jac[:3, 3] = (s1 - s2 - o1 + o2)
     jac[:3, :3] = var[3]*(dsdx1 + dsdx2)
     jac[3, :3] = 2*var[:3]
     jac[3, 3] = 0.0
@@ -86,39 +86,42 @@ def contact_compute(obj, idx1, idx2, n_ie, n_g):
     small = 1e-3
     V_ie = np.array([[1, 0, -0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5], [0, 0, 1]])
     V_ie = np.transpose(V_ie) * small
+    u_ie = o_bar / np.linalg.norm(o_bar)
 
     W_ie = np.zeros((3, 3))
     iter = 0
-    while(True):
-        iter += 1
-        for i in range(4):
-            singular = False
-            W_ie[:, 0] = V_ie[:, 0] if i > 0 else V_ie[:, 1]
-            W_ie[:, 1] = V_ie[:, 1] if i > 1 else V_ie[:, 2]
-            W_ie[:, 2] = V_ie[:, 2] if i > 2 else V_ie[:, 3]
-            try:
-                Winv_ie = np.linalg.inv(W_ie)
-            except:
-                singular = True
-                print(i)
-                break
-            c_ie = np.matmul(Winv_ie, o_bar)
-            if np.min(c_ie) >= 0:
-                break
+    # while(True):
+    #     iter += 1
+    #     for i in range(4):
+    #         singular = False
+    #         W_ie[:, 0] = V_ie[:, 0] if i > 0 else V_ie[:, 1]
+    #         W_ie[:, 1] = V_ie[:, 1] if i > 1 else V_ie[:, 2]
+    #         W_ie[:, 2] = V_ie[:, 2] if i > 2 else V_ie[:, 3]
+    #         try:
+    #             Winv_ie = np.linalg.inv(W_ie)
+    #         except:
+    #             singular = True
+    #             print(i)
+    #             break
+    #         c_ie = np.matmul(Winv_ie, o_bar)
+    #         if np.min(c_ie) >= 0:
+    #             break
         
-        if not singular:
-            u_ie = np.matmul(np.transpose(Winv_ie), u0)
-            u_ie /= np.linalg.norm(u_ie)
-        s1, dsdx1 = support_function(v1, p1, u_ie, o1)
-        s2, dsdx2 = support_function(v2, p2, -u_ie, o2)
-        V_ie[:3, :3] = W_ie
-        V_ie[:, 3] = s1 - s2 + o_bar
-        if iter >= n_ie or singular:
-            break
+    #     if not singular:
+    #         u_ie = np.matmul(np.transpose(Winv_ie), u0)
+    #         u_ie /= np.linalg.norm(u_ie)
+    #     s1, dsdx1 = support_function(v1, p1, u_ie, o1)
+    #     s2, dsdx2 = support_function(v2, p2, -u_ie, o2)
+    #     V_ie[:3, :3] = W_ie
+    #     V_ie[:, 3] = s1 - s2 + o_bar
+    #     if iter >= n_ie or singular:
+    #         break
     
+    s1, dsdx1 = support_function(v1, p1, u_ie, o1)
+    s2, dsdx2 = support_function(v2, p2, -u_ie, o2)
     var = np.zeros((4, ))
     var[:3] = u_ie / np.linalg.norm(u_ie)
-    var[3] = np.linalg.norm(o_bar) / np.linalg.norm(s1 - s2 + o_bar)
+    var[3] = np.sqrt(np.linalg.norm(o_bar) / np.linalg.norm(s1 - s2 + o_bar))
 
     res_list = []
     tr_radius = 10.0
@@ -161,29 +164,44 @@ def contact_compute(obj, idx1, idx2, n_ie, n_g):
     if var[3] < 1:
         gap = -gap
     
-    feature = {"s":[s1, s2], "n":normal, "g":gap, "res":res, "iter":iter, "x":var[:3], "nx":np.linalg.norm(var[:3])}
+    feature = {"s":[s1, s2], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
     return feature, res_list
 
 
 
 
-data = pd.read_csv("/home/sun/바탕화면/UROP/SupportFunction/models/pointcloud/0331_2_cube/stats.csv")
+data = pd.read_csv("/home/sun/바탕화면/UROP/SupportFunction/models/pointcloud/0418_2_cube/stats.csv")
 data = data.to_numpy()
 
-p = data[3485:3487, 0].astype(float)
-v = data[3488:3508, 0:3].astype(float)
+nc = 3
+nv = 10
+nd = 1742
+
+p = data[nc*nd+1:nc*nd+1+nc, 0].astype(float)
+v = data[nc*nd+2+nc:nc*nd+2+nc+nc*nv, 0:3].astype(float)
 x = np.array([1, 1, 1])
 
 o1 = np.mean(v[:10], axis = 0)
-o2 = np.mean(v[10:], axis = 0)
+o2 = np.mean(v[10:20], axis = 0)
 v1 = v[:10] - o1
-v2 = v[10:] - o2
+v2 = v[10:20] - o2
 p1 = p[0]
 p2 = p[1]
+
+o3 = np.mean(v[20:30], axis = 0)
+v3 = v[20:30] - o3
+p3 = p[2]
 # s1, dsdx1 = support_function(v1, p1, x)
 # s2, dsdx2 = support_function(v2, p2, x)
 
-obj = {"o":[o1, o2], "v":[v1, v2], "p":[p1, p2]}
+obj = {"o":[o1, o2, o3], "v":[v1, v2, v3], "p":[p1, p2, p3]}
 
-feature, res_list = contact_compute(obj, 0, 1, 10, 10)
+feature, res_list = contact_compute(obj, 0, 1, 0, 20)
+print("Object 0 1")
+print(feature)
+feature, res_list = contact_compute(obj, 0, 2, 0, 20)
+print("Object 0 2")
+print(feature)
+feature, res_list = contact_compute(obj, 1, 2, 0, 20)
+print("Object 1 2")
 print(feature)
