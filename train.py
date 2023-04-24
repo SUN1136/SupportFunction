@@ -48,7 +48,7 @@ def main(unused_argv):
   optimizer = tf.train.AdamOptimizer(FLAGS.lr)
 
   # Set up the graph
-  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap = model.compute_loss(
+  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef = model.compute_loss(
       batch, training=True, optimizer=optimizer)
 
   # Training hooks
@@ -74,12 +74,15 @@ def main(unused_argv):
       max_wait_secs=3600) as mon_sess:
 
     while not mon_sess.should_stop():
-      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var, overlap_var = mon_sess.run(
-        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap])
-      if step_var % log_count == 0:
+      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var, overlap_var, iter_var, undef_var = mon_sess.run(
+        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef])
+      if step_var % 10 == 0:
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
         print("Smoothness: ", smooth_var[0, :])
         print("Growth Ratio: ", overlap_var[0, :, 0])
+        print("Loop Iter: ", iter_var)
+        print("")
+        # print("Undef: ", undef_var)
       if step_var >= FLAGS.max_steps - 1:
         out_var = out_var[0, :, :]
         smooth_var = smooth_var[0, :]

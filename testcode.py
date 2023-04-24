@@ -27,6 +27,6 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-a = tf.ones((3, 4, 5))
-print(tf.shape(a[:, :, 2:]))
-print(tf.shape(a[:, :, 4:]))
+a = tf.constant([0.0])
+a = a / tf.constant([0.0])
+print(a)
