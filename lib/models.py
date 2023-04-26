@@ -19,6 +19,7 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow.compat.v1 as tf
+import sys
 
 from lib import pointnet
 
@@ -44,6 +45,7 @@ class MultiConvexNet(keras.Model):
     self._image_input = args.image_input
     self._dims = 3
 
+    self._init_lr = args.lr
     self._batch_size = args.batch_size
 
     # self._useS = args.use_surface_sampling
@@ -76,7 +78,7 @@ class MultiConvexNet(keras.Model):
 
     if not self._image_input:
       beta = self.encode(points, training=training)
-    
+
     out_points, direction_h, overlap, trans, vertices, smoothness, direc, locvert, dhdz, zm, iter, undef = self.decode(beta, training=training)
 
     # if self._useS:
@@ -89,7 +91,7 @@ class MultiConvexNet(keras.Model):
     overlap_loss = self._compute_overlap_loss(overlap)
 
     loss = h_loss + s_loss + 0.1*overlap_loss
-    # loss = h_loss + s_loss
+    # loss = s_loss + 0.1*overlap_loss
 
     if training:
       tf.summary.scalar("loss", loss)
@@ -105,10 +107,13 @@ class MultiConvexNet(keras.Model):
     if training:
       global_step = tf.train.get_or_create_global_step()
       update_ops = self.updates
+      lr = tf.train.exponential_decay(self._init_lr, global_step, 10000, 0.95, staircase = True)
+      optimizer = optimizer(lr)
+
       with tf.control_dependencies(update_ops):
         gradients, variables = zip(*optimizer.compute_gradients(loss))
-        # gradients = [tf.where(tf.is_nan(grad), tf.zeros_like(grad), grad) for grad in gradients]
-        gradients, unused_var = tf.clip_by_global_norm(gradients, 5.0)
+        gradients = [tf.where(tf.is_finite(grad) == False, tf.zeros_like(grad), grad) for grad in gradients]
+        gradients, unused_var = tf.clip_by_global_norm(gradients, 1.0)
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
       return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm, points, overlap, iter, undef
@@ -157,7 +162,7 @@ class MultiConvexNet(keras.Model):
     smoothness = tf.reshape(smoothness, [-1, self._n_parts])
     vertices, smoothness = self._clamp_params(vertices, smoothness, 1, 40)
     return vertices, smoothness
-  
+
   def _clamp_params(self, vertices, smoothness, vert_mag, max_p):
     vert = tf.tanh(vertices * vert_mag) / 2
     # vertices = tf.sigmoid(50*vertices) - 0.5
@@ -174,11 +179,11 @@ class MultiConvexNet(keras.Model):
     x = directions[:, :, :, 0]
     y = directions[:, :, :, 1]
     z = directions[:, :, :, 2]
-    distances = tf.pow(x, 2) + tf.pow(y, 2) + tf.pow(z, 2)
+    distances = x*x + y*y + z*z
     sample_loss = tf.reduce_min(distances, axis = 2)
     sample_loss = tf.reduce_mean(sample_loss)
     return sample_loss
-  
+
   def _compute_h_loss(self, gt, output, translations):
     gt_points = tf.expand_dims(gt, axis = 2)
     gt_points = tf.tile(gt_points, [1, 1, tf.shape(translations)[1], 1])
@@ -193,7 +198,7 @@ class MultiConvexNet(keras.Model):
 
     dot = tf.matmul(gt_local, out_points)
     dot = tf.transpose(dot, [0, 2, 1, 3])
-    
+
     h = output[:, :, :, 3]
     h = tf.expand_dims(h, axis = 1)
     h = tf.tile(h, [1, tf.shape(dot)[1], 1, 1])
@@ -201,7 +206,7 @@ class MultiConvexNet(keras.Model):
     outsurf = dot - h
     outsurf = outsurf * tf.cast(outsurf > 0, tf.float32)
     # outsurf = tf.clip_by_value(outsurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(outsurf < 1e-10, tf.float32)*1e-10
-    outsurf = tf.pow(outsurf, 2)
+    outsurf = outsurf*outsurf
     outsurf = tf.reduce_max(outsurf, axis = -1)
     outsurf = tf.reduce_min(outsurf, axis = -1)
 
@@ -209,10 +214,10 @@ class MultiConvexNet(keras.Model):
 
     isin = tf.cast(insurf >= 0, tf.float32)
     isin = tf.reduce_min(isin, axis = -1)
-    
+
     insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
     # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
-    insurf = tf.pow(insurf, 2)
+    insurf = insurf*insurf
     insurf = tf.reduce_min(insurf, axis = -1)
 
     insurf = insurf * isin
@@ -220,9 +225,9 @@ class MultiConvexNet(keras.Model):
 
     h_loss = tf.reduce_mean(outsurf + 10*insurf)
     return h_loss
-  
+
   def _compute_overlap_loss(self, overlap):
-    overlap_loss = overlap - 0.75
+    overlap_loss = overlap - 1.0
     overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
     return overlap_loss
 
@@ -247,7 +252,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     self._n_th2 = 2*(n_th1 - 1) + 1
 
     self._n_th = self._n_th1 * self._n_th2
-    self._n_out_points = (self._n_th1 - 2) * (self._n_th2 - 1) + 2 
+    self._n_out_points = (self._n_th1 - 2) * (self._n_th2 - 1) + 2
     self._n_mesh = (self._n_th1 - 2)*(self._n_th2 - 1)*2
 
     self._lb = 1e-20
@@ -309,7 +314,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     #   self.mesh_filter.append(tmp)
     # self.mesh_filter = tf.concat(self.mesh_filter, axis = -1)
     # self.mesh_filter = tf.expand_dims(self.mesh_filter, axis = -1)
-    
+
 
   def call(self, vertices, smoothness):
     """Decode the support function parameters into surface point samples.
@@ -321,7 +326,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     Returns:
       points: Tensor, [batch_size, n_surface_points, 3], output surface point samples.
     """
-    
+
     """
     mean_vertices: Tensor, [batch, n_parts, 1, 3], centor of geometry for each convex
     local_vertices: Tensor, [batch, n_parts, n_vertices, 3], vertices on convex local coordinate
@@ -368,7 +373,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     overlap, iter, undef = self._compute_overlap(vertices, smoothness, translations)
 
     return direction_h, surf_points, overlap, iter, undef
-  
+
   def _compute_spt(self, x, vertices, smoothness, translations, get_h = True, get_dsdx = False):
     """Compute output.
 
@@ -401,7 +406,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     zm_log = tf.reduce_max(zm_log, axis = 2, keepdims = True)
     exponent = zm_log * p2
     lk = tf.cast(exponent < self._lb_exponent, tf.float32) * ((self._lb_exponent - exponent) / p2)
-    k = tf.clip_by_value(tf.ceil(lk), clip_value_min = 0, clip_value_max = self._ub)
+    k = tf.clip_by_value(tf.ceil(lk), clip_value_min = 0.0, clip_value_max = self._ub_exponent)
     base = tf.ones(tf.shape(k)) * 10.0
     k = tf.pow(base, k)
     k2 = k
@@ -422,7 +427,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
     surf_points = dhdx + translations
 
-    
+
     if get_dsdx:
       "Compute ds/dx"
       zm_p_2 = tf.clip_by_value(tf.pow(zm, p1 - 2), clip_value_min = self._lb, clip_value_max = self._ub)
@@ -432,9 +437,9 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       zm_p_1 = tf.clip_by_value(tf.pow(zm, p1 - 1), clip_value_min = self._lb, clip_value_max = self._ub)
       zm_p_1 = tf.transpose(zm_p_1, [0, 1, 3, 2])
       mat_zm_p_1 = tf.matmul(tf.expand_dims(zm_p_1, axis = -1), tf.expand_dims(zm_p_1, axis = -2))
-      
+
       # dsdx = diag_zm_p_2 - tf.clip_by_value(mat_zm_p_1 / tf.expand_dims(tf.transpose(tf.clip_by_value(sum_zm_p, clip_value_min = self._lb, clip_value_max = self._ub), [0, 1, 3, 2]), axis = -1), clip_value_min = self._lb, clip_value_max = self._ub)
-      
+
       sum_zm_1 = tf.clip_by_value(tf.pow(sum_zm_p, 1 / p2 - 1), clip_value_min = self._lb, clip_value_max = self._ub)
       sum_zm_1 = tf.expand_dims(tf.transpose(sum_zm_1, [0, 1, 3, 2]), axis = -1)
       sum_zm_2 = tf.clip_by_value(tf.pow(sum_zm_p, 1 / p2 - 2), clip_value_min = self._lb, clip_value_max = self._ub)
@@ -442,12 +447,12 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
       v_left = tf.tile(tf.expand_dims(tf.transpose(vertices, [0, 1, 3, 2]), axis = 2), [1, 1, n_d, 1, 1])
       v_right = tf.tile(tf.expand_dims(vertices, axis = 2), [1, 1, n_d, 1, 1])
-      
+
       dsdx = diag_zm_p_2*sum_zm_1 - mat_zm_p_1*sum_zm_2
 
       dsdx = tf.matmul(tf.matmul(v_left, dsdx), v_right)
 
-      
+
       p3 = tf.expand_dims(tf.expand_dims(tf.expand_dims(smoothness, axis = -1), axis = -1), axis = -1)
       k3 = tf.expand_dims(tf.transpose(k2, [0, 1, 3, 2]), axis = -1)
 
@@ -457,6 +462,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       # dsdx_sgn = tf.sign(dsdx)
       # dsdx_sgn = dsdx_sgn + tf.cast(dsdx_sgn == 0.0, tf.float32)
       # dsdx = dsdx_sgn * tf.clip_by_value(tf.abs(dsdx), clip_value_min = self._lb, clip_value_max = self._ub)
+      dsdx = tf.clip_by_value(dsdx, clip_value_min = -self._ub, clip_value_max = self._ub)
 
       if get_h:
         h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
@@ -464,7 +470,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
         return h, surf_points, dsdx
       else:
         return surf_points, dsdx
-      
+
     else:
       if get_h:
         h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
@@ -472,7 +478,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
         return h, surf_points
       else:
         return surf_points
-  
+
   def _compute_overlap(self, vertices, smoothness, translations):
     """Compute overlapping state.
 
@@ -485,10 +491,12 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       overlap: Tensor, [batch_size, n_parts, 1], convex minimum growth rate.
     """
     n_c = self._n_parts
-    
+
     overlap_list = []
     loop_iter = tf.constant([0])
-    # undef_list = []
+    undef_list = []
+    undef_j = tf.constant([0.0])
+    undef = tf.constant([0.0])
 
     for i in range(n_c - 1):
       n_jc = n_c - 1 - i
@@ -523,10 +531,9 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
         det_W = tf.linalg.det(W_ie)
         min_det = tf.reduce_min(tf.abs(det_W))
+        max_det = tf.reduce_max(tf.abs(det_W))
 
-        if min_det < 1e-10:
-          continue
-        else:
+        if min_det > self._lb and max_det < self._ub:
           iter += 1
 
           W_inv_ie = tf.linalg.inv(W_ie)
@@ -550,9 +557,12 @@ class ConvexSurfaceSampler(keras.layers.Layer):
           s_bar = s2 - s1
 
           V_ie = tf.concat([max_W, tf.transpose(o_bar - s_bar, [0, 1, 3, 2])], axis = -1)
+          
+        else:
+          continue
 
       loop_iter = iter
-      
+
       s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
       s2 = self._compute_spt(-u_ie, j_v, j_p, j_t, get_h=False)
       s_bar = s2 - s1
@@ -562,10 +572,10 @@ class ConvexSurfaceSampler(keras.layers.Layer):
       var = tf.concat([tf.squeeze(u_ie, axis = 2), sig], axis = -1)
 
       tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], n_jc, 4, 1))
-      iter = 0
+      g_iter = 0
 
       # noninvertible = False
-      for j in range(20):
+      for j in range(10):
         f, jac = self._residual(o_bar, i_v, i_p, i_t, j_v, j_p, j_t, var)
         res = self._safe_norm(f, axis = -1)
 
@@ -583,25 +593,59 @@ class ConvexSurfaceSampler(keras.layers.Layer):
         # except:
         #   noninvertible = True
         #   continue
-        # undef_j = tf.constant([0.0])
 
         if tf.reduce_max(res) > 1e-6:
           # # Debug 0
           # undef_j = tf.reduce_max(tf.cast(tf.is_nan(res), tf.float32))
 
+          # cond = tf.cast(self._tf_cond(jac, 1e-10), tf.float32)
+          # cond_min = tf.reduce_max(cond)
+          # if cond_min < -0.1:
+          #   undef = tf.tile(tf.expand_dims(tf.expand_dims(cond, axis = -1), axis = -1), [1, 1, 1, 4])
+          #   undef = tf.concat([undef, jac], axis = 2)
+          #   undef = tf.concat([undef, tf.tile(tf.expand_dims(tf.expand_dims(tf.linalg.det(jac), axis = -1), axis = -1), [1, 1, 1, 4])], axis = 2)
+          #   undef = tf.concat([undef, tf.transpose(f, [0, 1, 3, 2])], axis = 2)
+          #   undef = tf.concat([undef, tf.expand_dims(var, axis = 2)], axis = 2)
+          #   undef = tf.concat([undef, tf.zeros_like(tf.expand_dims(var, axis = 2))], axis = 2)
+          #   continue
+          # else:
+            # undef = tf.tile(tf.expand_dims(tf.expand_dims(cond, axis = -1), axis = -1), [1, 1, 1, 4])
+          undef = jac
+          undef = tf.concat([undef, tf.tile(tf.expand_dims(tf.expand_dims(tf.linalg.det(jac), axis = -1), axis = -1), [1, 1, 1, 4])], axis = 2)
+          undef = tf.concat([undef, tf.transpose(f, [0, 1, 3, 2])], axis = 2)
+          undef = tf.concat([undef, tf.expand_dims(var, axis = 2)], axis = 2)
+
+          # jac_inv = tf.linalg.pinv(jac)
+          # pseudo_id = tf.matmul(jac_inv, jac)
+          # pseudo_diff = tf.reshape(tf.eye(4), [1, 1, 4, 4]) - pseudo_id
+          # pseudo_diff = tf.reduce_max(tf.reduce_sum(tf.abs(pseudo_diff), axis = [-2, -1]))
+
+          # undef = tf.concat([undef, tf.matmul(jac_inv, jac)], axis = 2)
+          
+          # if pseudo_diff < 0.2:
+
           jac_det = tf.linalg.det(jac)
-          jac_det = tf.reduce_min(tf.abs(jac_det))
+          jac_det_min = tf.reduce_min(tf.abs(jac_det))
+          jac_det_max = tf.reduce_max(tf.abs(jac_det))
 
-          if jac_det < 1e-10:
-            continue
-          else:
-            iter += 1
+          if jac_det_min > self._lb and jac_det_max < self._ub:
+            undef = tf.concat([undef, tf.zeros_like(tf.expand_dims(var, axis = 2))], axis = 2)
 
+            g_iter += 1
+          
             jac_inv = tf.linalg.inv(jac)
+            
+            # try:
+            #   jac_inv = tf.linalg.inv(jac)
+            # except Exception:
+            #   undef = tf.concat([undef, tf.ones_like(tf.expand_dims(var, axis = 2))], axis = 2)
+            #   continue
+            # undef = tf.concat([undef, tf.zeros_like(tf.expand_dims(var, axis = 2))], axis = 2)
+
             # jac_sgn = tf.sign(jac_inv)
             # jac_sgn = jac_sgn + tf.cast(jac_sgn == 0.0, tf.float32)
             # jac_inv = jac_sgn * tf.clip_by_value(tf.abs(jac_inv), clip_value_min = self._lb, clip_value_max = self._ub)
-            
+
             # # Debug 1
             # undef_j = tf.concat([[undef_j], [tf.reduce_max(tf.cast(tf.is_nan(jac_inv), tf.float32))]], axis = -1)
 
@@ -654,23 +698,35 @@ class ConvexSurfaceSampler(keras.layers.Layer):
             # # Debug 9
             # undef_j = tf.concat([undef_j, [tf.reduce_max(tf.cast(tf.is_nan(var), tf.float32))]], axis = -1)
 
+          else:
+            undef = tf.concat([undef, tf.ones_like(tf.expand_dims(var, axis = 2))], axis = 2)
+            # if iter == 10 and g_iter <= 1:
+            #   u_ie = o_bar / self._safe_norm(o_bar, axis = -1, keepdims = True)
+            #   s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
+            #   s2 = self._compute_spt(-u_ie, j_v, j_p, j_t, get_h=False)
+            #   s_bar = s2 - s1
+            #   sig = tf.clip_by_value(self._safe_norm(o_bar, axis = -1) / self._safe_norm(o_bar - s_bar, axis = -1), clip_value_min = self._lb, clip_value_max = self._ub)
+            #   var = tf.concat([tf.squeeze(u_ie, axis = 2), sig], axis = -1)
+            continue
+
         else:
           # undef_j = tf.constant([0.0])
           pass
 
         # undef_list.append(tf.reshape(undef_j, [1, -1]))
 
-      
+
       "Record Growth Ratio"
       f = self._residual(o_bar, i_v, i_p, i_t, j_v, j_p, j_t, var, get_jac = False)
 
       u_ie = tf.expand_dims(var[:, :, :3], axis = 2)
+      u_ie = u_ie / self._safe_norm(u_ie, axis = [-2, -1], keepdims = True)
       u_ie = tf.stop_gradient(u_ie)
       s1 = self._compute_spt(u_ie, i_v, i_p, i_t, get_h=False)
       s2 = self._compute_spt(-u_ie, j_v, j_p, j_t, get_h=False)
       s_bar = s2 - s1
-      sigma = tf.clip_by_value(self._safe_norm(o_bar, axis = -1) / self._safe_norm(o_bar - s_bar, axis = -1), clip_value_min = self._lb, clip_value_max = self._ub)
-      
+      sigma = tf.clip_by_value(self._safe_norm(o_bar, axis = -1) / self._safe_norm(o_bar - s_bar, axis = -1), clip_value_min = 0.0, clip_value_max = self._ub_exponent)
+      sigma = tf.reduce_min(sigma, axis = 1, keepdims = True)
       # sigma = tf.reduce_min(var[:, :, 3:4], axis = 1, keepdims = True)
 
       # if noninvertible:
@@ -678,32 +734,34 @@ class ConvexSurfaceSampler(keras.layers.Layer):
 
       overlap_list.append(sigma)
 
-      loop_iter = tf.concat([[loop_iter], [iter]], axis = -1)
+      loop_iter = tf.concat([[loop_iter], [g_iter]], axis = -1)
+      # loop_iter = g_iter
 
 
     "End of Loop"
     overlap = tf.concat(overlap_list, axis = 1)
     # undef = tf.concat(undef_list, axis = 0)
-    undef = tf.constant([0.0])
+    # undef = tf.constant([0.0])
     return overlap, loop_iter, undef
-  
+
   def _residual(self, o_bar, i_v, i_p, i_t, vertices, smoothness, translations, var, get_jac = True):
     x = tf.expand_dims(var[:, :, :3], axis = 2)
-    
+
     s1, dsdx1 = self._compute_spt(x, i_v, i_p, i_t, get_h=False, get_dsdx=True)
     s2, dsdx2 = self._compute_spt(-x, vertices, smoothness, translations, get_h=False, get_dsdx=True)
 
-    f = tf.concat([(var[:, :, 3:4]*tf.squeeze(s1 - s2, axis = 2) + (1 - var[:, :, 3:4])*tf.squeeze(-o_bar, axis = 2)), (tf.expand_dims(tf.reduce_sum(x*x - 1.0, axis = [2, 3]), axis = -1))], axis = -1)
+    f = tf.concat([(var[:, :, 3:4]*tf.squeeze(s1 - s2, axis = 2) + (1 - var[:, :, 3:4])*tf.squeeze(-o_bar, axis = 2)), (tf.expand_dims(tf.reduce_sum(x*x, axis = [2, 3]) - 1.0, axis = -1))], axis = -1)
     f = tf.expand_dims(f, axis = -1)
 
     if get_jac:
       jac = tf.expand_dims(var[:, :, 3:4], axis = -1) * tf.squeeze(dsdx1 + dsdx2, axis = 2)
       jac = tf.concat([jac, tf.transpose(s1 - s2 + o_bar, [0, 1, 3, 2])], axis = -1)
       jac = tf.concat([jac, tf.concat([2.0*x, tf.zeros((tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1))], axis = -1)], axis = -2)
+      jac = tf.clip_by_value(jac, clip_value_min = -self._ub, clip_value_max = self._ub)
       return f, jac
     else:
       return f
-  
+
   def _dogleg(self, dN, dC, tr_radius):
     dN_norm = self._safe_norm(dN, axis = [-2, -1], keepdims = True)
     dC_norm = self._safe_norm(dC, axis = [-2, -1], keepdims = True)
@@ -711,10 +769,10 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     dC_filter = tf.cast(dC_norm > tr_radius, tf.float32)
 
     a = self._safe_norm(dN - dC, axis = [-2, -1], keepdims = True)
-    a = a*a
+    a = tf.clip_by_value(a*a, clip_value_min = self._lb, clip_value_max = self._ub)
     b = tf.matmul(tf.transpose(dC, [0, 1, 3, 2]), dN - dC)
     c = b*b - a*(tf.reduce_sum(dC*dC, axis = [-2, -1], keepdims = True) - tr_radius*tr_radius)
-    tau = tf.clip_by_value((-b + tf.sqrt(tf.abs(c) + self._lb)) / a, clip_value_min = self._lb, clip_value_max = self._ub)
+    tau = tf.clip_by_value((-b + tf.sqrt(tf.abs(c) + self._lb)) / a, clip_value_min = -self._ub, clip_value_max = self._ub)
 
     dD = dN_filter * dN
 
@@ -725,11 +783,25 @@ class ConvexSurfaceSampler(keras.layers.Layer):
     dD += tf.cast((1.0 - dN_filter) == dC_filter, tf.float32) * dC / self._safe_norm(dC, axis = [-2, -1], keepdims = True)
     dD += tf.cast((1.0 - dN_filter) == (1.0 - dC_filter), tf.float32) * (dC + tau*(dN - dC))
 
-    return dD
-  
+    return tf.clip_by_value(dD, clip_value_min = -self._ub, clip_value_max = self._ub)
+
   def _safe_norm(self, x, axis, keepdims = False):
     norm = tf.sqrt(tf.reduce_sum(x*x, axis = axis, keepdims = keepdims) + self._lb)
     return norm
+  
+  # def _tf_cond(self, x, eps = 1e-10):
+  #   s = tf.linalg.svd(x, compute_uv = False)
+  #   # r = tf.clip_by_value(s, clip_value_min = 0.0, clip_value_max = self._ub) < eps
+
+  #   r = s[..., 0] / s[..., -1]
+  #   x_nan = tf.reduce_any(tf.is_nan(x), axis = [-2, -1])
+  #   r_nan = tf.is_nan(r)
+  #   r_inf = tf.fill(tf.shape(r), tf.constant(np.inf, r.dtype))
+  #   tf.where(x_nan, r, tf.where(r_nan, r_inf, r))
+
+  #   eps_inv = tf.cast(1 / eps, x.dtype)
+  #   # return s, r
+  #   return tf.is_finite(r) and (r < eps_inv)
 
   # def _compute_spt(self, x, mesh_idx, vertices, smoothness, translations):
   #   """Compute support function and surface point samples.
@@ -803,7 +875,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
   #   mesh_cross = tf.linalg.cross(v1, v2)
   #   mesh_area = tf.norm(mesh_cross, axis = -1) / 2
   #   mesh_area = tf.matmul(mesh_area, transform)
-    
+
   #   mesh_area_top = tf.cast(mesh_area > tf.reduce_mean(mesh_area, axis = -1, keepdims = True), tf.float32)
   #   mesh_top_num = tf.cast(tf.reduce_min(tf.reduce_sum(mesh_area_top, axis = -1)), tf.int32)
   #   if ntop > mesh_top_num:
@@ -816,7 +888,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
   #     if nbottom > mesh_bottom_num:
   #       nbottom = mesh_bottom_num
   #     unused_var, mesh_bottomk = tf.nn.top_k(mesh_area_bottom, k = nbottom)
-    
+
   #   # tf.math.reduce_std(mesh_area, axis = -1, keepdims = True)/3)
 
   #   mesh_filter = tf.tile(self.mesh_filter, [1, 1, 1, ntop + nbottom])
@@ -840,7 +912,7 @@ class ConvexSurfaceSampler(keras.layers.Layer):
   #   v1 = mesh_max[:, :, :, 0, :]
   #   v2 = mesh_max[:, :, :, 1, :]
   #   v3 = mesh_max[:, :, :, 2, :]
-    
+
   #   mesh_points = []
   #   for i in range(n_mesh_inter):
   #     for j in range(n_mesh_inter):

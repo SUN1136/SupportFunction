@@ -45,11 +45,11 @@ def main(unused_argv):
   # Select model.
   logging.info("=> Creating {} model".format(FLAGS.model))
   model = models.get_model(FLAGS.model, FLAGS)
-  optimizer = tf.train.AdamOptimizer(FLAGS.lr)
+  # optimizer = tf.train.AdamOptimizer(FLAGS.lr)
 
   # Set up the graph
   train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef = model.compute_loss(
-      batch, training=True, optimizer=optimizer)
+      batch, training=True, optimizer=tf.train.AdamOptimizer)
 
   # Training hooks
   stop_hook = tf.train.StopAtStepHook(last_step=FLAGS.max_steps)
@@ -60,8 +60,10 @@ def main(unused_argv):
   step_counter_hook = tf.train.StepCounterHook(summary_writer=summary_writer)
   hooks = [stop_hook, step_counter_hook, summary_hook]
 
+  sing_list = []
+  sing = 0
   logging.info("=> Start training loop ...")
-  log_count = 10
+  log_count = 1000
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=FLAGS.train_dir,
       hooks=hooks,
@@ -76,14 +78,33 @@ def main(unused_argv):
     while not mon_sess.should_stop():
       unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var, overlap_var, iter_var, undef_var = mon_sess.run(
         [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef])
-      if step_var % 10 == 0:
+      if step_var % 1000 == 0:
+        print("")
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
         print("Smoothness: ", smooth_var[0, :])
         print("Growth Ratio: ", overlap_var[0, :, 0])
         print("Loop Iter: ", iter_var)
+        print("Undef: ", undef_var)
         print("")
-        # print("Undef: ", undef_var)
+        sing_list.append(sing)
+        sing = 0
+      if undef_var[0, 0, -1, 0] != 0:
+        print("")
+        print("----------Singularity----------")
+        print("Step: ", step_var, "\t\tLoss: ", loss_var)
+        print("Smoothness: ", smooth_var[0, :])
+        print("Growth Ratio: ", overlap_var[0, :, 0])
+        print("Loop Iter: ", iter_var)
+        print("Undef: ", undef_var)
+        print("")
+        sing += 1
+        # raise Exception("----------Singularity----------")
       if step_var >= FLAGS.max_steps - 1:
+        sing_list = np.array(sing_list)
+        print("")
+        print("Singularity result: ", sing_list)
+        print("")
+        
         out_var = out_var[0, :, :]
         smooth_var = smooth_var[0, :]
         # beta_var = beta_var[0, :].reshape(-1, )

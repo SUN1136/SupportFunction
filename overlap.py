@@ -197,7 +197,7 @@ p2 = p[1]
 obj = {"o":[o1, o2], "v":[v1, v2], "p":[p1, p2]}
 # obj = {"o":[o1, o2, o3], "v":[v1, v2, v3], "p":[p1, p2, p3]}
 
-feature, res_list = contact_compute(obj, 0, 1, 10, 20)
+feature, res_list = contact_compute(obj, 0, 1, 10, 10)
 print("Object 0 1")
 print(feature)
 # feature, res_list = contact_compute(obj, 0, 2, 0, 20)

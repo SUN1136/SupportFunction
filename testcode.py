@@ -27,6 +27,14 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-a = tf.constant([0.0])
-a = a / tf.constant([0.0])
+a = tf.constant([1.5, 20.2, 61.2, 1.513, 6.124, 0.0021, 0.515, 1.2385, 0.121, 3.22, 0.000001, 51.22 ,2e-20, 3.124e-6, 2.121e-12, 1.112e-4])
+a = tf.reshape(a, [4, 4])
 print(a)
+print(tf.linalg.inv(a))
+print(tf.linalg.pinv(a))
+print("")
+maxa = tf.reduce_max(a)
+a = a / maxa
+print(a)
+print(tf.linalg.inv(a) / maxa)
+print(tf.linalg.pinv(a) / maxa)
