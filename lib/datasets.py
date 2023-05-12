@@ -21,6 +21,7 @@ from os import path
 
 import tensorflow.compat.v1 as tf
 
+# tf.set_random_seed(454545)
 
 def get_dataset(data_name, split, args):
   return dataset_dict[data_name](split, args)

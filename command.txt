@@ -1,8 +1,7 @@
-/home/sun/바탕화면/UROP/SupportFunction
-
 python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class="cube"
+python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class="sphere"
 python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class="L"
 
-tensorboard --logdir=./models/pointcloud/
+
 
 

@@ -53,14 +53,10 @@ def define_flags():
       "checkpoints.")
   flags.DEFINE_integer("save_every", 20000,
                        "The number of steps to save checkpoint.")
-  flags.DEFINE_integer("max_steps", 50000, "The number of steps of training.")
+  flags.DEFINE_integer("max_steps", 2000, "The number of steps of training.")
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
   flags.DEFINE_integer("sample_point", 1024, "The number of sample points.")
   flags.DEFINE_integer("n_convex_altitude", 31, "The output surface resolution angle degrees.")
-  # flags.DEFINE_integer("n_mesh_inter", 5, "The mesh interpolation factor.")
-  # flags.DEFINE_integer("n_top_k", 50, "The number of meshes for top k sampling.")
-  # flags.DEFINE_integer("n_bottom_k", 0, "The number of meshes for bottom k sampling.")
-  # flags.DEFINE_bool("use_surface_sampling", False, "Use surface sampling points for training.")
   flags.mark_flag_as_required("train_dir")
 
   # Eval flags

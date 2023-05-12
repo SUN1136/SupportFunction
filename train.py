@@ -18,8 +18,8 @@ gpus = tf2.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
         # memory limit 10 times increased
-        tf2.config.experimental.set_virtual_device_configuration(gpus[0], [tf2.config.experimental.VirtualDeviceConfiguration(memory_limit=1500000)])
-        # tf.config.experimental.set_memory_growth(gpus[0], True)
+        # tf2.config.experimental.set_virtual_device_configuration(gpus[0], [tf2.config.experimental.VirtualDeviceConfiguration(memory_limit=1500000)])
+        tf2.config.experimental.set_memory_growth(gpus[0], True)
         print("\n----------GPU Loaded----------\n")
     except RuntimeError as e:
         print(e)
@@ -48,7 +48,7 @@ def main(unused_argv):
   # optimizer = tf.train.AdamOptimizer(FLAGS.lr)
 
   # Set up the graph
-  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef = model.compute_loss(
+  train_loss, train_op, global_step, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, retraction, iter, iter_ret, undef, undef_ret, undef_ret_2 = model.compute_loss(
       batch, training=True, optimizer=tf.train.AdamOptimizer)
 
   # Training hooks
@@ -76,15 +76,24 @@ def main(unused_argv):
       max_wait_secs=3600) as mon_sess:
 
     while not mon_sess.should_stop():
-      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var, overlap_var, iter_var, undef_var = mon_sess.run(
-        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, iter, undef])
-      if step_var % 1000 == 0:
+      unused_var, loss_var, step_var, unused_var4, out_var, beta_var, vert_var, smooth_var, direc_var, locvert_var, dhdz_var, zm_var, points_var, overlap_var, retraction_var, iter_var, iter_ret_var, undef_var, undef_ret_var, undef_ret_2_var = mon_sess.run(
+        [batch, train_loss, global_step, train_op, out_points, beta, vert, smooth, direc, locvert, dhdz, zm, points, overlap, retraction, iter, iter_ret, undef, undef_ret, undef_ret_2])
+      if step_var % 100 == 0:
         print("")
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
         print("Smoothness: ", smooth_var[0, :])
         print("Growth Ratio: ", overlap_var[0, :, 0])
+        print("Retraction: ", np.array([np.min(retraction_var), np.max(retraction_var)]))
+        print("Retraction Quantile: ", np.quantile(retraction_var[0, :, 0], 0.25), np.quantile(retraction_var[0, :, 0], 0.5), np.quantile(retraction_var[0, :, 0], 0.75))
+        print("Retraction Mean: ", np.mean(retraction_var[0, :, 0]))
+        print("Retraction Large: ", np.sum((retraction_var[0, :, 0] > 0.1)*1))
+        print("Retraction Points: ", np.array([points_var[0, np.argmin(retraction_var[0, :, 0]), :], points_var[0, np.argmax(retraction_var[0, :, 0]), :]]))
         print("Loop Iter: ", iter_var)
+        print("Retraction Loop Iter: ", iter_ret_var)
         print("Undef: ", undef_var)
+        # print("Retraction Undef: ", undef_ret_var)
+        # print("Retraction Undef: ", undef_ret_var[0, :, np.argmin(retraction_var[0, :, 0]), :], undef_ret_var[0, :, np.argmax(retraction_var[0, :, 0]), :])
+        # print("Retraction Undef: ", undef_ret_var[0, :, np.argmin(retraction_var[0, :, 0]), 0, :], undef_ret_var[0, :, np.argmax(retraction_var[0, :, 0]), 0, :])
         print("")
         sing_list.append(sing)
         sing = 0
@@ -95,7 +104,9 @@ def main(unused_argv):
         print("Smoothness: ", smooth_var[0, :])
         print("Growth Ratio: ", overlap_var[0, :, 0])
         print("Loop Iter: ", iter_var)
+        print("Retraction Loop Iter: ", iter_ret_var)
         print("Undef: ", undef_var)
+        # print("Retraction Undef: ", undef_ret_var)
         print("")
         sing += 1
         # raise Exception("----------Singularity----------")
@@ -145,6 +156,53 @@ def main(unused_argv):
           fout.write("overlap\n")
           for i in range(overlap_var.shape[0]):
             fout.write("{}\n".format(overlap_var[i]))
+
+          fout.write("Minimum 0\n")
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 0], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 1], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 2]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 3], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 4], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 5]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 6], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 7], undef_ret_var[0, 0, np.argmin(retraction_var[0, :, 0]), 8]))
+          fout.write("Minimum 1\n")
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 0], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 1], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 2]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 3], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 4], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 5]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 6], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 7], undef_ret_var[0, 1, np.argmin(retraction_var[0, :, 0]), 8]))
+          fout.write("Maximum 0\n")
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 0], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 1], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 2]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 3], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 4], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 5]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 6], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 7], undef_ret_var[0, 0, np.argmax(retraction_var[0, :, 0]), 8]))
+          fout.write("Maximum 1\n")
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 0], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 1], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 2]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 3], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 4], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 5]))
+          fout.write("{0},{1},{2}\n".format(undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 6], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 7], undef_ret_var[0, 1, np.argmax(retraction_var[0, :, 0]), 8]))
+          for j in range(2):
+            fout.write("Maximum Data {}\n".format(j))
+            fout.write("initial direction convex {0} iter {1}\n".format(j, i))
+            fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 17, 0], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 17, 0], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 17, 0], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 17, 0]))
+            for i in range(20):
+              fout.write("Trust region convex {0} iter {1}\n".format(j, i))
+              fout.write("{}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 0, i]))
+              fout.write("dD convex {0} iter {1}\n".format(j, i))
+              fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 1, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 1, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 1, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 1, i]))
+              fout.write("Jacobian convex {0} iter {1}\n".format(j, i))
+              for k in range(4):
+                fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 2, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 3, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 4, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 5, i]))
+              fout.write("Inverse jacobian convex {0} iter {1}\n".format(j, i))
+              for k in range(4):
+                fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 6, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 7, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 8, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), k, 9, i]))
+              fout.write("F convex {0} iter {1}\n".format(j, i))
+              fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 10, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 10, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 10, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 10, i]))
+              fout.write("dN convex {0} iter {1}\n".format(j, i))
+              fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 11, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 11, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 11, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 11, i]))
+              fout.write("dC convex {0} iter {1}\n".format(j, i))
+              fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 12, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 12, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 12, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 12, i]))
+              fout.write("var convex {0} iter {1}\n".format(j, i))
+              fout.write("{0},{1},{2},{3}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 13, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 1, 13, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 2, 13, i], undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 3, 13, i]))
+              fout.write("residual convex {0} iter {1}\n".format(j, i))
+              fout.write("{}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 14, i]))
+              fout.write("actual reduction convex {0} iter {1}\n".format(j, i))
+              fout.write("{}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 15, i]))
+              fout.write("predict reduction convex {0} iter {1}\n".format(j, i))
+              fout.write("{}\n".format(undef_ret_2_var[0, j, np.argmax(retraction_var[0, :, 0]), 0, 16, i]))
+              
 
 
 if __name__ == "__main__":

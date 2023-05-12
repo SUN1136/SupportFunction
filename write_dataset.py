@@ -223,8 +223,64 @@ def get_cube_edge(num_points, scale, obj):
 
     return points, example_path
 
+def get_microphone(num_points, scale, obj):
+    points = []
+    
+    face_num = np.array([0, 1, 2])
+    face_prob = np.array([143.0, 106.0, 21.0])
+    face_prob = face_prob / np.sum(face_prob)
+
+    n_th1 = 1000
+    th1_list = []
+    th_prob = []
+    for i in range(1, n_th1):
+        th1_list.append(i/n_th1*(3*np.pi / 4))
+        th_prob.append(np.sin(i/n_th1*(3*np.pi / 4)))
+    th1_list = np.array(th1_list).reshape(-1, )
+    th_prob = np.array(th_prob).reshape(-1, )
+    th_prob = th_prob / np.sum(th_prob)
+
+    r = 0.2
+    r2 = 0.1 * np.sqrt(2)
+    h = 0.3 + 0.2 - r2
+
+    for i in range(num_points):
+        face = np.random.choice(face_num, 1, p = face_prob)[0]
+
+        if face == 0:
+            th1 = np.random.choice(th1_list, 1, p = th_prob)[0]
+            th2 = np.random.rand() * 2*np.pi
+            x = r * np.sin(th1) * np.cos(th2)
+            y = r * np.sin(th1) * np.sin(th2)
+            z = r * np.cos(th1)
+            z += r2
+        elif face == 1:
+            th3 = np.random.rand() * 2*np.pi
+            x = r2 * np.cos(th3)
+            y = r2 * np.sin(th3)
+            z = -np.random.rand() * h
+        elif face == 2:
+            th4 = np.random.rand() * 2*np.pi
+            rv = np.random.rand() * r2
+            x = rv * np.cos(th4)
+            y = rv * np.sin(th4)
+            z = -h
+        
+        points.append(x)
+        points.append(y)
+        points.append(z)
+    points = np.array(points, dtype = np.float32) * scale
+
+    dataset_path = "./dataset"
+    if not tf.io.gfile.isdir(dataset_path):
+        tf.io.gfile.makedirs(dataset_path)
+    example_path = path.join(dataset_path, obj + "-train-data.tfrecords")
+
+    return points, example_path
+
 def get_points(obj, num_points):
-    func_dict = {"cube":[get_cube, 0.5], "L":[get_L, 1], "sphere":[get_sphere, 0.25], "double_sphere":[get_double_sphere, 0.125], "cube_vertex":[get_cube_vertex, 0.5], "cube_edge":[get_cube_edge, 0.5]}
+    func_dict = {"cube":[get_cube, 0.5], "L":[get_L, 1], "sphere":[get_sphere, 0.25], "double_sphere":[get_double_sphere, 0.125], 
+                 "cube_vertex":[get_cube_vertex, 0.5], "cube_edge":[get_cube_edge, 0.5], "microphone":[get_microphone, 1]}
     return func_dict[obj][0](num_points, func_dict[obj][1], obj)
 
 def main():
@@ -232,7 +288,7 @@ def main():
     np.random.seed(45)
 
     num_points = 100000
-    points, example_path = get_points("cube_edge", num_points)
+    points, example_path = get_points("microphone", num_points)
 
     write_tfrecord(points, example_path)
 
