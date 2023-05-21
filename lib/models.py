@@ -79,16 +79,16 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
 
-    out_points, direction_h, overlap, retraction, trans, vertices, smoothness, direc, locvert, dhdz, zm, iter, iter_ret, undef, undef_ret, undef_ret_2 = self.decode(
+    out_points, direction_h, overlap, distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
       beta, points, training=training)
 
     h_loss = self._compute_h_loss(points, direction_h, trans)
-    # h_loss = self._compute_retraction_loss(retraction)
+    dist_loss, in_loss = self._compute_distance_loss(distance)
     s_loss = self._compute_sample_loss(points, out_points)
     overlap_loss = self._compute_overlap_loss(overlap)
 
-    loss = h_loss + s_loss + 0.1*overlap_loss
-    # loss = 0.1*h_loss + s_loss + 0.1*overlap_loss
+    loss = dist_loss + 0.1*overlap_loss + 10*in_loss
+    # loss = h_loss + s_loss + 0.1*overlap_loss
     # loss = h_loss + s_loss
 
     if training:
@@ -115,7 +115,7 @@ class MultiConvexNet(keras.Model):
         gradients, unused_var = tf.clip_by_global_norm(gradients, 1.0)
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
-      return loss, train_op, global_step, out_points, beta, vertices, smoothness, direc, locvert, dhdz, zm, points, overlap, retraction, iter, iter_ret, undef, undef_ret, undef_ret_2
+      return loss, train_op, global_step, out_points, vertices, smoothness, points, overlap, distance, iter, iter_dist, undef, undef_dist
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -147,8 +147,8 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, 3], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direction_h, overlap, retraction, trans, direc, locvert, dhdz, zm, iter, iter_ret, undef, undef_ret, undef_ret_2 = self.cvx(vertices, smoothness, pointcloud)
-    return out_points, direction_h, overlap, retraction, trans, vertices, smoothness, direc, locvert, dhdz, zm, iter, iter_ret, undef, undef_ret, undef_ret_2
+    out_points, direction_h, overlap, distance, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
+    return out_points, direction_h, overlap, distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -211,15 +211,18 @@ class MultiConvexNet(keras.Model):
 
     insurf = h - dot
 
-    isin = tf.cast(insurf >= 0, tf.float32)
-    isin = tf.reduce_min(isin, axis = -1)
+    # isin = tf.cast(insurf >= 0, tf.float32)
+    # isin = tf.reduce_min(isin, axis = -1)
 
-    insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
-    # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
+    # insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
+    # # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
+    # insurf = insurf*insurf
+    # insurf = tf.reduce_min(insurf, axis = -1)
+
+    # insurf = insurf * isin
+    insurf = insurf * tf.cast(insurf >= 0, tf.float32)
     insurf = insurf*insurf
     insurf = tf.reduce_min(insurf, axis = -1)
-
-    insurf = insurf * isin
     insurf = tf.reduce_max(insurf, axis = -1)
 
     h_loss = tf.reduce_mean(outsurf + 10*insurf)
@@ -230,10 +233,14 @@ class MultiConvexNet(keras.Model):
     overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
     return overlap_loss
   
-  def _compute_retraction_loss(self, retraction):
-    ret_loss = retraction - 1.0
-    ret_loss = tf.reduce_mean(ret_loss * ret_loss)
-    return ret_loss
+  def _compute_distance_loss(self, distance):
+    min_dist = tf.reduce_min(tf.abs(distance), axis = 1)
+    dist_loss = min_dist
+    dist_loss = tf.reduce_mean(dist_loss)
+
+    in_point = -distance * tf.cast(distance < 0, tf.float32)
+    in_loss = tf.reduce_mean(in_point)
+    return dist_loss, in_loss
 
 
 

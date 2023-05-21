@@ -80,6 +80,25 @@ def residual_ret(obj, idx1, point, var):
 
     return f, jac
 
+def residual_normal(obj, idx1, point, var):
+    o1 = obj["o"][idx1]
+    v1 = obj["v"][idx1]
+    p1 = obj["p"][idx1]
+
+    s1, dsdx1 = support_function(v1, p1, var[:3], o1)
+
+    f = np.zeros((4, ))
+    f[:3] = point - s1 - var[3]*var[:3]
+    f[3] = np.sum(var[:3]**2) - 1
+
+    jac = np.zeros((4, 4))
+    jac[:3, 3] = -var[:3]
+    jac[:3, :3] = -dsdx1 - var[3]*np.eye(3)
+    jac[3, :3] = 2*var[:3]
+    jac[3, 3] = 0.0
+
+    return f, jac
+
 def dogleg(dN, dC, tr_radius):
     if np.linalg.norm(dN) < tr_radius:
         return dN
@@ -224,6 +243,8 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
     iter = 0
     while(True):
         iter += 1
+        print("")
+        print(iter)
         for i in range(4):
             singular = False
             W_ie[:, 0] = V_ie[:, 0] if i > 0 else V_ie[:, 1]
@@ -236,7 +257,7 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
                 Winv_ie = np.linalg.inv(W_ie)
             except:
                 singular = True
-                print(iter)
+                # print(iter)
                 break
             c_ie = np.matmul(Winv_ie, o_bar)
             if np.min(c_ie) >= 0:
@@ -248,8 +269,17 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
         s1, dsdx1 = support_function(v1, p1, u_ie, o1)
         V_ie[:3, :3] = W_ie
         V_ie[:, 3] = s1 - o1
-        print("IE iter: ", iter)
-        print("IE direction: ", u_ie)
+        # print("IE iter: ", iter)
+        # print("IE direction: ", u_ie)
+
+        print("W_ie")
+        print(W_ie)
+        print("Winv_ie")
+        print(Winv_ie)
+        print("u_ie")
+        print(u_ie)
+        print("s")
+        print(s1)
         if iter >= n_ie or singular:
             break
     
@@ -265,7 +295,7 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
     iter = 0
     growth_iter = 0
 
-    print("initial: ", var[:3])
+    # print("initial: ", var[:3])
     while(True):
         iter += 1
         f, jac = residual_ret(obj, idx1, point, var)
@@ -303,11 +333,11 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
             growth_iter += 1
             var = var + dD
         
-        print("iter: ", iter)
-        print("tr_radius: ", tr_radius)
-        print("dD: ", dD)
-        print("dN: ", dN)
-        print("dC: ", dC)
+        # print("iter: ", iter)
+        # print("tr_radius: ", tr_radius)
+        # print("dD: ", dD)
+        # print("dN: ", dN)
+        # print("dC: ", dC)
     
     var = var - dD
     s1, dsdx1 = support_function(v1, p1, var[:3], o1)
@@ -316,9 +346,104 @@ def retract_compute(obj, idx1, point, n_ie, n_g):
     if var[3] < 1:
         gap = -gap
     
-    print(growth_iter)
+    # print(growth_iter)
     feature = {"s":[s1, point], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
     return feature, res_list
+
+def normal_compute(obj, idx1, point, n_ie, n_g):
+    o1 = obj["o"][idx1]
+    o_bar = point - o1
+    v1 = obj["v"][idx1]
+    p1 = obj["p"][idx1]
+
+    u_ie = o_bar / np.linalg.norm(o_bar)
+
+    u0 = np.array([1, 1, 1])
+    
+    small = 1e-3
+    V_ie = np.array([[1, 0, -0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5], [0.0, 0.0, 1]])
+    V_ie = np.transpose(V_ie) * small
+    u_ie = o_bar / np.linalg.norm(o_bar)
+
+    W_ie = np.zeros((3, 3))
+    iter = 0
+    while(True):
+        iter += 1
+        for i in range(4):
+            singular = False
+            W_ie[:, 0] = V_ie[:, 0] if i > 0 else V_ie[:, 1]
+            W_ie[:, 1] = V_ie[:, 1] if i > 1 else V_ie[:, 2]
+            W_ie[:, 2] = V_ie[:, 2] if i > 2 else V_ie[:, 3]
+
+            try:
+                Winv_ie = np.linalg.inv(W_ie)
+            except:
+                singular = True
+                break
+            c_ie = np.matmul(Winv_ie, o_bar)
+            if np.min(c_ie) >= 0:
+                break
+        
+        if not singular:
+            u_ie = np.matmul(np.transpose(Winv_ie), u0)
+            u_ie /= np.linalg.norm(u_ie)
+        s1, dsdx1 = support_function(v1, p1, u_ie, o1)
+        V_ie[:3, :3] = W_ie
+        V_ie[:, 3] = s1 - o1
+
+        if iter >= n_ie or singular:
+            break
+    
+    s1, dsdx1 = support_function(v1, p1, u_ie, o1)
+    var = np.zeros((4, ))
+    var[:3] = u_ie / np.linalg.norm(u_ie)
+    var[3] = np.linalg.norm(point - s1)
+
+    tr_radius = 10.0
+    rho = 0
+    iter = 0
+    growth_iter = 0
+
+    while(True):
+        iter += 1
+        f, jac = residual_normal(obj, idx1, point, var)
+        
+        res = np.linalg.norm(f)
+        if res < 1e-6 or iter >= n_g:
+            break
+
+        dN = -np.matmul(np.linalg.inv(jac), f)
+        grad = np.matmul(np.transpose(jac), f)
+        dC = - np.linalg.norm(grad)**2 / np.linalg.norm(np.matmul(jac, grad))**2 * grad
+        dD = dogleg(dN, dC, tr_radius)
+        
+        f_next, jac_next = residual_normal(obj, idx1, point, var + dD)
+        act_red = (np.linalg.norm(f)**2 - np.linalg.norm(f_next)**2) / 2
+        pred_red = -np.dot(grad, dD) - np.linalg.norm(np.matmul(jac, dD))**2 / 2
+
+        if pred_red == 0:
+            rho = 1e10
+        else:
+            rho = act_red / pred_red
+
+        if rho < 0.05:
+            tr_radius = 0.25 * np.linalg.norm(dD)
+        elif rho > 0.9:
+            tr_radius = np.max([tr_radius, 3*np.linalg.norm(dD)])
+        
+        if rho > 0.05:
+            growth_iter += 1
+            var = var + dD
+    
+    var = var - dD
+    s1, dsdx1 = support_function(v1, p1, var[:3], o1)
+    normal = var[:3] / np.linalg.norm(var[:3])
+    gap = np.linalg.norm(s1 - point)
+    if var[3] < 1:
+        gap = -gap
+
+    feature = {"s":[s1, point], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
+    return feature
 
 
 data = pd.read_csv("/home/sun/바탕화면/UROP/SupportFunction/models/pointcloud/stats.csv")
@@ -358,14 +483,17 @@ obj = {"o":[o1, o2], "v":[v1, v2], "p":[p1, p2]}
 # print("Object 1 2")
 # print(feature)
 
-point = np.array([0.214191049337387, 0.25, 0.200231999158859])
+point = np.array([-0.25, 0.233605071902275, 0.237206786870956])
 
-feature, res_list = retract_compute(obj, 1, point, 10, 20)
+print("o0")
+print(o1)
+feature = normal_compute(obj, 0, point, 10, 10)
+print("")
 print("Object 0 1")
 print(feature)
 
-dir1 = np.array([-0.996795177459717, 0.065613508224487, 0.045763701200485])
-dir2 = np.array([-0.996630370616913, 0.066496707499027, 0.048020020127297])
-s1, dsdx1 = support_function(v1, p1, dir1, o1)
-s2, dsdx2 = support_function(v2, p2, dir2, o2)
-print(s1, s2)
+# dir1 = np.array([-0.010858897119761, 0.999239802360535, 0.037442542612553])
+# # dir2 = np.array([-0.996630370616913, 0.066496707499027, 0.048020020127297])
+# s1, dsdx1 = support_function(v1, p1, dir1, o1)
+# # s2, dsdx2 = support_function(v2, p2, dir2, o2)
+# print(s1)
