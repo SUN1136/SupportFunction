@@ -78,16 +78,18 @@ def main(unused_argv):
     while not mon_sess.should_stop():
       unused_var, loss_var, step_var, unused_var4, out_var, vert_var, smooth_var, points_var, overlap_var, distance_var, iter_var, iter_dist_var, undef_var, undef_dist_var = mon_sess.run(
         [batch, train_loss, global_step, train_op, out_points, vert, smooth, points, overlap, distance, iter, iter_dist, undef, undef_dist])
-      distance_var = np.min(distance_var, axis = 1)
+      distance_var = np.min(np.abs(distance_var), axis = 1)
       if step_var % 100 == 0:
         print("")
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
         print("Smoothness: ", smooth_var[0, :])
         print("Growth Ratio: ", overlap_var[0, :, 0])
-        print("Retraction: ", np.array([np.min(distance_var), np.max(distance_var)]))
+        print("Distances: ", np.array([np.min(distance_var), np.max(distance_var)]))
+        print("Undef: ", undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 9], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 10], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 11])
+        print("Undef: ", undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 9], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 10], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 11])
         # print("Retraction Quantile: ", np.quantile(retraction_var[0, :, 0], 0.25), np.quantile(retraction_var[0, :, 0], 0.5), np.quantile(retraction_var[0, :, 0], 0.75))
         # print("Retraction Mean: ", np.mean(retraction_var[0, :, 0]))
-        # print("Retraction Large: ", np.sum((retraction_var[0, :, 0] > 0.1)*1))
+        print("Retraction Diverge: ", np.sum((distance_var > 0.1)*1))
         # print("Retraction Points: ", np.array([points_var[0, np.argmin(retraction_var[0, :, 0]), :], points_var[0, np.argmax(retraction_var[0, :, 0]), :]]))
         print("Loop Iter: ", iter_var)
         print("Retraction Loop Iter: ", iter_dist_var)

@@ -27,5 +27,5 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-a = tf.eye(3, batch_shape = [3])
-print(tf.shape())
+a = tf.constant([np.nan, 0.0])
+print(a < 0)

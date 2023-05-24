@@ -79,15 +79,16 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
 
-    out_points, direction_h, overlap, distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
+    out_points, direction_h, overlap, distance, surf_distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
       beta, points, training=training)
 
-    h_loss = self._compute_h_loss(points, direction_h, trans)
-    dist_loss, in_loss = self._compute_distance_loss(distance)
-    s_loss = self._compute_sample_loss(points, out_points)
+    # h_loss = self._compute_h_loss(points, direction_h, trans)
+    dist_loss = self._compute_distance_loss(distance)
+    # s_loss = self._compute_sample_loss(points, out_points)
     overlap_loss = self._compute_overlap_loss(overlap)
+    in_loss = self._compute_inside_loss(surf_distance, out_points, points)
 
-    loss = dist_loss + 0.1*overlap_loss + 10*in_loss
+    loss = dist_loss + 0.1*overlap_loss + in_loss
     # loss = h_loss + s_loss + 0.1*overlap_loss
     # loss = h_loss + s_loss
 
@@ -147,8 +148,8 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, 3], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direction_h, overlap, distance, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
-    return out_points, direction_h, overlap, distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
+    out_points, direction_h, overlap, distance, surf_distance, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
+    return out_points, direction_h, overlap, distance, surf_distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -238,9 +239,36 @@ class MultiConvexNet(keras.Model):
     dist_loss = min_dist
     dist_loss = tf.reduce_mean(dist_loss)
 
-    in_point = -distance * tf.cast(distance < 0, tf.float32)
-    in_loss = tf.reduce_mean(in_point)
-    return dist_loss, in_loss
+    # in_point = -distance * tf.cast(distance < 0, tf.float32)
+    # in_loss = tf.reduce_mean(in_point)
+    return dist_loss
+  
+  def _compute_inside_loss(self, surf_distance, surf_points, points):
+    # directions = tf.constant([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]])
+    # directions = tf.cast(directions, tf.float32)
+    # directions = directions / tf.linalg.norm(directions, axis = -1, keepdims = True)
+    
+    # directions = tf.tile(tf.reshape(directions, [1, 1, 14, 3]), [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1]) # (B,C,14,3)
+    # directions = tf.tile(tf.expand_dims(directions, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,14,3)
+    # directions = tf.transpose(directions, [0, 1, 2, 4, 3]) # (B,C,P,3,14)
+
+    # center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
+    # local_points = tf.expand_dims(points, axis = 1) - center # (B,C,P,3)
+    # local_points = local_points / tf.sqrt(tf.reduce_sum(local_points*local_points, axis = -1, keepdims = True) + 1e-30)
+    # local_points = tf.expand_dims(local_points, axis = 3) # (B,C,P,1,3)
+
+    # in_loss = tf.squeeze(tf.matmul(local_points, directions), axis = -2) # (B,C,P,14)
+    # in_loss = tf.reduce_max(in_loss, axis = -2) # (B,C,14)
+    # in_loss = 1 - in_loss
+    # in_loss = tf.reduce_mean(in_loss)
+
+    point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
+    point_dist = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
+    in_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
+    in_loss = tf.reduce_min(in_loss, axis = 1) # (B,CD,1)
+    in_loss = tf.reduce_mean(in_loss)
+    
+    return in_loss
 
 
 

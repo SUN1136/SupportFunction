@@ -445,6 +445,82 @@ def normal_compute(obj, idx1, point, n_ie, n_g):
     feature = {"s":[s1, point], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
     return feature
 
+def FW_compute(obj, idx1, point, n_fw, n_g):
+    o1 = obj["o"][idx1]
+    v1 = obj["v"][idx1]
+    p1 = obj["p"][idx1]
+
+    x_fw = o1
+    u_fw = point - x_fw
+    u_fw = u_fw / np.linalg.norm(u_fw)
+
+    iter = 0
+    while (True):
+        iter += 1
+
+        s_fw, unused_var = support_function(v1, p1, u_fw, o1)
+        x_fw = x_fw + np.dot(s_fw - x_fw, point - x_fw) / np.linalg.norm(x_fw - s_fw)**2 * (s_fw - x_fw)
+        u_fw = point - x_fw
+        u_fw = u_fw / np.linalg.norm(u_fw)
+        
+        if iter >= n_fw:
+            break
+    
+    s1, unused_var = support_function(v1, p1, u_fw, o1)
+
+    var = np.zeros((4, ))
+    var[:3] = u_fw
+    var[3] = np.dot(point - s1, u_fw)
+
+    tr_radius = 10.0
+    rho = 0
+    iter = 0
+
+    while(True):
+        iter += 1
+        f, jac = residual_normal(obj, idx1, point, var)
+        
+        res = np.linalg.norm(f)
+        if res < 1e-6 or iter >= n_g:
+            break
+
+        dN = -np.matmul(np.linalg.inv(jac), f)
+        grad = np.matmul(np.transpose(jac), f)
+        dC = - np.linalg.norm(grad)**2 / np.linalg.norm(np.matmul(jac, grad))**2 * grad
+        dD = dogleg(dN, dC, tr_radius)
+        
+        f_next, jac_next = residual_normal(obj, idx1, point, var + dD)
+        act_red = (np.linalg.norm(f)**2 - np.linalg.norm(f_next)**2) / 2
+        pred_red = -np.dot(grad, dD) - np.linalg.norm(np.matmul(jac, dD))**2 / 2
+
+        if pred_red == 0:
+            rho = 1e10
+        else:
+            rho = act_red / pred_red
+
+        if rho < 0.05:
+            tr_radius = 0.25 * np.linalg.norm(dD)
+        elif rho > 0.9:
+            tr_radius = np.max([tr_radius, 3*np.linalg.norm(dD)])
+        
+        if rho > 0.05:
+            var = var + dD
+    
+    var = var - dD
+    dir = var[:3] / np.linalg.norm(var[:3])
+    s1, dsdx1 = support_function(v1, p1, dir, o1)
+    normal =dir
+    gap = np.linalg.norm(s1 - point)
+    if var[3] < 1:
+        gap = -gap
+
+    feature = {"s":[s1, point], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
+    return feature
+
+
+
+
+
 
 data = pd.read_csv("/home/sun/바탕화면/UROP/SupportFunction/models/pointcloud/stats.csv")
 data = data.to_numpy()
@@ -483,11 +559,9 @@ obj = {"o":[o1, o2], "v":[v1, v2], "p":[p1, p2]}
 # print("Object 1 2")
 # print(feature)
 
-point = np.array([-0.25, 0.233605071902275, 0.237206786870956])
+point = np.array([-0.25, -0.222286343574524, -0.186079248785973])
 
-print("o0")
-print(o1)
-feature = normal_compute(obj, 0, point, 10, 10)
+feature = FW_compute(obj, 1, point, 20, 10)
 print("")
 print("Object 0 1")
 print(feature)

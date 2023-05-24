@@ -73,10 +73,10 @@ class ConvexDecoder(keras.layers.Layer):
     mean_vertices = tf.reduce_mean(vertices, axis = 2, keepdims = True)
     local_vertices = vertices - mean_vertices
 
-    direction_h, points, overlap, distance, iter, iter_dist, undef, undef_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
+    direction_h, points, overlap, distance, surf_distance, iter, iter_dist, undef, undef_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
     mean_vertices = tf.reshape(mean_vertices, [tf.shape(mean_vertices)[0], tf.shape(mean_vertices)[1], tf.shape(mean_vertices)[-1]])
 
-    return points, direction_h, overlap, distance, mean_vertices, iter, iter_dist, undef, undef_dist
+    return points, direction_h, overlap, distance, surf_distance, mean_vertices, iter, iter_dist, undef, undef_dist
 
   def _compute_output(self, x, vertices, smoothness, translations, pointcloud):
     """Compute output.
@@ -95,7 +95,7 @@ class ConvexDecoder(keras.layers.Layer):
     local_directions = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
     local_directions = tf.tile(local_directions, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
 
-    x = tf.transpose(x, [0, 1])
+    # x = tf.transpose(x, [0, 1])
     x = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
     x = tf.tile(x, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
 
@@ -110,11 +110,19 @@ class ConvexDecoder(keras.layers.Layer):
     overlap, iter, undef = self._compute_overlap(vertices, smoothness, translations)
     # retraction, iter_ret, undef_ret, undef_ret_2 = self._compute_retraction(vertices, smoothness, translations, pointcloud)
     distance, iter_dist, undef_dist = self._compute_distance(vertices, smoothness, translations, pointcloud)
+    surf_distance, unused_var, unused_var2 = self._compute_distance(vertices, smoothness, translations, surf_points) # (B,C,CD,1)
+    surf_distance = tf.reshape(surf_distance, [tf.shape(surf_distance)[0], self._n_parts, self._n_parts, -1, 1])
+
+    dist_filter = 100*tf.expand_dims(tf.expand_dims(tf.expand_dims(tf.eye(self._n_parts), axis = -1), axis = -1), axis = 0) # (1,C,C,1,1)
+    dist_filter = tf.tile(dist_filter, [tf.shape(surf_distance)[0], 1, 1, tf.shape(surf_distance)[3], 1])
+    surf_distance = tf.where(dist_filter > 0, dist_filter, surf_distance)
+    surf_distance = tf.reshape(surf_distance, [tf.shape(surf_distance)[0], self._n_parts, -1, 1])
+
     # retraction = tf.zeros((1, 100, 1))
     # iter_ret = tf.constant([1, 1])
     # undef_ret = tf.constant([[1.0], [1.0]])
 
-    return direction_h, surf_points, overlap, distance, iter, iter_dist, undef, undef_dist
+    return direction_h, surf_points, overlap, distance, surf_distance, iter, iter_dist, undef, undef_dist
 
   def _compute_spt(self, x, vertices, smoothness, translations, get_h = True, get_dsdx = False):
     """Compute output.
@@ -685,85 +693,42 @@ class ConvexDecoder(keras.layers.Layer):
 
     sp = tf.tile(tf.expand_dims(tf.expand_dims(points, axis = 1), axis = 3), [1, n_c, 1, 1, 1]) # (B,C,P,1,3)
     o = tf.tile(tf.expand_dims(translations, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,1,3)
-    o_bar = sp - o
-    o_bar2 = tf.tile(tf.expand_dims(tf.transpose(o_bar, [0, 1, 2, 4, 3]), axis = 3), [1, 1, 1, 4, 1, 1]) # (B,C,P,4,3,1)
 
-    u_ie = o_bar / tf.linalg.norm(o_bar, axis = -1, keepdims = True)
-    u_ie = tf.squeeze(u_ie, axis = 3) # (B,C,P,3)
-    s = tf.zeros_like(u_ie)
-    s = tf.expand_dims(s, axis = 3) # (B,C,P,1,3)
-    u0 = tf.tile(tf.reshape(tf.constant([1.0, 1.0, 1.0]), [1, 1, 1, 3, 1]), [tf.shape(vertices)[0], n_c, tf.shape(points)[1], 1, 1]) # (B,C,P,3,1)
+    x_fw = tf.squeeze(o, axis = -2) # (B,C,P,3)
+    u_fw = tf.squeeze(sp, axis = -2) - x_fw # (B,C,P,3)
+    u_fw = u_fw / self._safe_norm(u_fw, axis = -1, keepdims = True)
 
 
-    "IE Initialization"
-    V_ie = 1e-3 * tf.constant([[1.0, 0.0, -0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5], [0.0, 0.0, 1.0]])
-    V_ie = tf.tile(tf.reshape(tf.transpose(V_ie, [1, 0]), [1, 1, 1, 3, 4]), [tf.shape(vertices)[0], n_c, tf.shape(points)[1], 1, 1]) # (B,C,P,3,4)
-    W_ie = tf.tile(tf.zeros([1, 1, 1, 4, 3, 3]), [tf.shape(vertices)[0], n_c, tf.shape(points)[1], 1, 1, 1]) # (B,C,P,4,3,3)
-    W_filter = tf.tile(tf.reshape(tf.constant([0.0, 1.0, 2.0, 3.0]), [1, 1, 1, 4]), [tf.shape(vertices)[0], n_c, tf.shape(points)[1], 1]) # (B,C,P,4)
-    c_negative = tf.tile(tf.reshape(tf.constant([3.0, 3.0, 3.0, 3.0]), [1, 1, 1, 4]), [tf.shape(vertices)[0], n_c, tf.shape(points)[1], 1]) # (B,C,P,4)
-
-    prev_W = W_ie
-    max_W = tf.tile(tf.zeros_like(u0), [1, 1, 1, 1, 3])
-    max_W_inv = tf.tile(tf.zeros_like(u0), [1, 1, 1, 1, 3])
-
+    "FW Initialization"
     iter = 0
-    for j in range(30):
-      W_ie_0 = tf.expand_dims(tf.concat([V_ie[:, :, :, :, 1:2], V_ie[:, :, :, :, 2:3], V_ie[:, :, :, :, 3:4]], axis = -1), axis = 3) # (B,C,P,1,3,3)
-      W_ie_1 = tf.expand_dims(tf.concat([V_ie[:, :, :, :, 0:1], V_ie[:, :, :, :, 2:3], V_ie[:, :, :, :, 3:4]], axis = -1), axis = 3)
-      W_ie_2 = tf.expand_dims(tf.concat([V_ie[:, :, :, :, 0:1], V_ie[:, :, :, :, 1:2], V_ie[:, :, :, :, 3:4]], axis = -1), axis = 3)
-      W_ie_3 = tf.expand_dims(tf.concat([V_ie[:, :, :, :, 0:1], V_ie[:, :, :, :, 1:2], V_ie[:, :, :, :, 2:3]], axis = -1), axis = 3)
-      W_ie =  tf.concat([W_ie_0, W_ie_1, W_ie_2, W_ie_3], axis = 3) # (B,C,P,4,3,3)
+    for j in range(20):
+      iter += 1
+      
+      s_fw = self._compute_spt(u_fw, vertices, smoothness, translations, get_h = False) # (B,C,P,3)
+      prev_x = x_fw
+      x_fw = x_fw + tf.squeeze(tf.matmul(tf.expand_dims(s_fw - x_fw, axis = -2), tf.expand_dims(tf.squeeze(sp, axis = -2) - x_fw, axis = -1)), axis = -1) / tf.linalg.norm(s_fw - x_fw, axis = -1, keepdims = True) * (s_fw - x_fw)
 
-      det_W = tf.linalg.det(W_ie) # (B,C,P,4)
-      min_det = tf.reduce_min(tf.abs(det_W))
-      max_det = tf.reduce_max(tf.abs(det_W))
-      W_finite = tf.reduce_min(tf.cast(tf.is_finite(W_ie), tf.float32))
+      x_finite = tf.is_finite(s_fw - x_fw)
+      x_filter = tf.tile(tf.linalg.norm(s_fw - x_fw, axis = -1, keepdims = True), [1, 1, 1, 3]) < 1e-30
+      x_fw = tf.where(tf.logical_or(x_filter, tf.logical_not(x_finite)), prev_x, x_fw)
 
-      det_filter = tf.tile(tf.expand_dims(tf.expand_dims(tf.abs(det_W), axis = -1), axis = -1), [1, 1, 1, 1, 3, 3]) < 1e-30
-      W_ie = tf.where(det_filter, prev_W, W_ie)
-      prev_W = W_ie
+      prev_u = u_fw
+      u_fw = tf.squeeze(sp, axis = -2) - x_fw
+      u_finite = tf.is_finite(u_fw)
+      u_filter = tf.tile(tf.linalg.norm(u_fw, axis = -1, keepdims = True), [1, 1, 1, 3]) < 1e-30
+      u_fw = tf.where(tf.logical_or(u_filter, tf.logical_not(u_finite)), prev_u, u_fw)
 
-      if (W_finite > 0.5):
-        iter += 1
-
-        # W_inv_ie = tf.linalg.inv(W_ie)
-        W_inv_ie = self._cramer_inv(W_ie, 3) # (B,C,P,4,3,3)
-        c_ie = tf.matmul(W_inv_ie, o_bar2) # (B,C,P,4,3,1)
-
-        min_c = tf.cast(tf.reduce_min(c_ie, axis = [-2, -1]) >= 0, tf.float32) # (B,C,P,4)
-        unused_var, max_W_idx = tf.nn.top_k(min_c, k = 1)
-        max_W_idx = tf.cast(tf.tile(max_W_idx, [1, 1, 1, 4]), tf.float32) # (B,C,P,4)
-
-        c_filter = tf.tile(tf.reduce_max(min_c, axis = -1, keepdims = True), [1, 1, 1, 4]) < 0.5
-        max_W_idx = tf.where(c_filter, c_negative, max_W_idx)
-
-        max_W_idx = tf.expand_dims(tf.expand_dims(tf.cast(tf.abs(max_W_idx - W_filter) < 0.1, tf.float32), axis = -1), axis = -1) # (B,C,P,4,1,1)
-        max_W_inv = W_inv_ie * max_W_idx # (B,C,P,4,3,3)
-        max_W_inv = tf.reduce_sum(max_W_inv, axis = 3) # (B,C,P,3,3)
-        max_W = W_ie * max_W_idx
-        max_W = tf.reduce_sum(max_W, axis = 3) # (B,C,P,3,3)
-
-        u_ie = tf.matmul(tf.transpose(max_W_inv, [0, 1, 2, 4, 3]), u0) # (B,C,P,3,1)
-        u_norm = self._safe_norm(u_ie, axis = [-2, -1], keepdims = True) # (B,C,P,1,1)
-        u_ie = tf.transpose(u_ie / u_norm, [0, 1, 2, 4, 3]) # (B,C,P,1,3)
-        u_ie = tf.squeeze(u_ie, axis = 3) # (B,C,P,3)
-
-        s = self._compute_spt(u_ie, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
-        s = tf.expand_dims(s, axis = 3) # (B,C,P,1,3)
-
-        V_ie = tf.concat([max_W, tf.transpose(s - o, [0, 1, 2, 4, 3])], axis = -1) # (B,C,P,3,4)
-        
-      else:
-        pass
+      u_fw = u_fw / tf.linalg.norm(u_fw, axis = -1, keepdims = True)
       
     loop_iter = iter
 
-    s = self._compute_spt(u_ie, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
+    init_u = u_fw
+    s = self._compute_spt(u_fw, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
     s = tf.expand_dims(s, axis = 3) # (B,C,P,1,3)
 
     "Growth Model"
-    sig = tf.clip_by_value(tf.linalg.norm(sp - s, axis = -1), clip_value_min = self._lb, clip_value_max = self._ub) # (B,C,P,1)
-    var = tf.concat([u_ie, sig], axis = -1) # (B,C,P,4)
+    sig = tf.clip_by_value(tf.squeeze(tf.matmul(sp - s, tf.expand_dims(u_fw, axis = -1)), axis = -1), clip_value_min = self._lb, clip_value_max = self._ub) # (B,C,P,1)
+    var = tf.concat([u_fw, sig], axis = -1) # (B,C,P,4)
 
     tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], n_c, tf.shape(points)[1], 4, 1)) # (B,C,P,4,1)
     g_iter = 0
@@ -836,11 +801,11 @@ class ConvexDecoder(keras.layers.Layer):
     "Record Distances"
     f = self._residual_distance(sp, o, vertices, smoothness, translations, var, get_jac = False) # (B,C,P,4,1)
 
-    u_ie = tf.expand_dims(var[:, :, :, :3], axis = 3) # (B,C,P,1,3)
-    u_ie = u_ie / tf.linalg.norm(u_ie, axis = [-2, -1], keepdims = True)
-    u_ie = tf.squeeze(u_ie, axis = 3) # (B,C,P,3)
-    u_ie = tf.stop_gradient(u_ie)
-    s = self._compute_spt(u_ie, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
+    u = tf.expand_dims(var[:, :, :, :3], axis = 3) # (B,C,P,1,3)
+    u = u / tf.linalg.norm(u, axis = [-2, -1], keepdims = True)
+    u = tf.squeeze(u, axis = 3) # (B,C,P,3)
+    u = tf.stop_gradient(u)
+    s = self._compute_spt(u, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
     s = tf.expand_dims(s, axis = 3) # (B,C,P,1,3)
 
     # dist = self._safe_norm(sp - s, axis = -1) # (B,C,P,1)
@@ -852,9 +817,9 @@ class ConvexDecoder(keras.layers.Layer):
 
 
     "End of Loop"
-    distance = tf.squeeze(tf.matmul((sp - s), tf.expand_dims(u_ie, axis = -1)), axis = -1) # (B,C,P,1)
+    distance = tf.squeeze(tf.matmul((sp - s), tf.expand_dims(u, axis = -1)), axis = -1) # (B,C,P,1)
 
-    undef_ret = tf.concat([tf.squeeze(tf.concat([sp, s], axis = -1), axis = -2), u_ie], axis = -1) # (B,C,P,9)
+    undef_ret = tf.concat([tf.squeeze(tf.concat([sp, s], axis = -1), axis = -2), u, init_u], axis = -1) # (B,C,P,9(12))
     # undef_ret = res
 
     return distance, loop_iter, undef_ret
