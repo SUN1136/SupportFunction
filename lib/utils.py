@@ -56,7 +56,7 @@ def define_flags():
   flags.DEFINE_integer("max_steps", 10000, "The number of steps of training.")
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
   flags.DEFINE_integer("sample_point", 1024, "The number of sample points.")
-  flags.DEFINE_integer("n_convex_altitude", 31, "The output surface resolution angle degrees.")
+  flags.DEFINE_integer("n_convex_altitude", 21, "The output surface resolution angle degrees.")
   flags.mark_flag_as_required("train_dir")
 
   # Eval flags

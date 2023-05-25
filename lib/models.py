@@ -79,16 +79,19 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
 
-    out_points, direction_h, overlap, distance, surf_distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
+    out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
       beta, points, training=training)
 
     # h_loss = self._compute_h_loss(points, direction_h, trans)
     dist_loss = self._compute_distance_loss(distance)
     # s_loss = self._compute_sample_loss(points, out_points)
     overlap_loss = self._compute_overlap_loss(overlap)
-    in_loss = self._compute_inside_loss(surf_distance, out_points, points)
+    sample_loss = self._compute_sample_loss(surf_distance, out_points, points)
+    # center_loss = self._compute_center_loss(directions, vertices, points)
 
-    loss = dist_loss + 0.1*overlap_loss + in_loss
+    # loss = dist_loss + 0.1*overlap_loss
+    loss = dist_loss + 0.1*overlap_loss + sample_loss
+
     # loss = h_loss + s_loss + 0.1*overlap_loss
     # loss = h_loss + s_loss
 
@@ -148,8 +151,8 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, 3], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direction_h, overlap, distance, surf_distance, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
-    return out_points, direction_h, overlap, distance, surf_distance, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
+    out_points, direction_h, overlap, distance, surf_distance, directions, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
+    return out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -172,62 +175,62 @@ class MultiConvexNet(keras.Model):
     # p = tf.nn.sigmoid(smoothness) * max_p + 1
     return vert, p
 
-  def _compute_sample_loss(self, gt, output):
-    gt = tf.expand_dims(gt, axis = 1)
-    output = tf.expand_dims(output, axis = 2)
-    directions = output - gt
-    x = directions[:, :, :, 0]
-    y = directions[:, :, :, 1]
-    z = directions[:, :, :, 2]
-    distances = x*x + y*y + z*z
-    sample_loss = tf.reduce_min(distances, axis = 2)
-    sample_loss = tf.reduce_mean(sample_loss)
-    return sample_loss
+  # def _compute_sample_loss(self, gt, output):
+  #   gt = tf.expand_dims(gt, axis = 1)
+  #   output = tf.expand_dims(output, axis = 2)
+  #   directions = output - gt
+  #   x = directions[:, :, :, 0]
+  #   y = directions[:, :, :, 1]
+  #   z = directions[:, :, :, 2]
+  #   distances = x*x + y*y + z*z
+  #   sample_loss = tf.reduce_min(distances, axis = 2)
+  #   sample_loss = tf.reduce_mean(sample_loss)
+  #   return sample_loss
 
-  def _compute_h_loss(self, gt, output, translations):
-    gt_points = tf.expand_dims(gt, axis = 2)
-    gt_points = tf.tile(gt_points, [1, 1, tf.shape(translations)[1], 1])
-    trans = tf.expand_dims(translations, axis = 1)
-    trans = tf.tile(trans, [1, tf.shape(gt_points)[1], 1, 1])
+  # def _compute_h_loss(self, gt, output, translations):
+  #   gt_points = tf.expand_dims(gt, axis = 2)
+  #   gt_points = tf.tile(gt_points, [1, 1, tf.shape(translations)[1], 1])
+  #   trans = tf.expand_dims(translations, axis = 1)
+  #   trans = tf.tile(trans, [1, tf.shape(gt_points)[1], 1, 1])
 
-    gt_local = gt_points - trans
-    gt_local = tf.transpose(gt_local, [0, 2, 1, 3])
+  #   gt_local = gt_points - trans
+  #   gt_local = tf.transpose(gt_local, [0, 2, 1, 3])
 
-    out_points = output[:, :, :, 0:3]
-    out_points = tf.transpose(out_points, [0, 1, 3, 2])
+  #   out_points = output[:, :, :, 0:3]
+  #   out_points = tf.transpose(out_points, [0, 1, 3, 2])
 
-    dot = tf.matmul(gt_local, out_points)
-    dot = tf.transpose(dot, [0, 2, 1, 3])
+  #   dot = tf.matmul(gt_local, out_points)
+  #   dot = tf.transpose(dot, [0, 2, 1, 3])
 
-    h = output[:, :, :, 3]
-    h = tf.expand_dims(h, axis = 1)
-    h = tf.tile(h, [1, tf.shape(dot)[1], 1, 1])
+  #   h = output[:, :, :, 3]
+  #   h = tf.expand_dims(h, axis = 1)
+  #   h = tf.tile(h, [1, tf.shape(dot)[1], 1, 1])
 
-    outsurf = dot - h
-    outsurf = outsurf * tf.cast(outsurf > 0, tf.float32)
-    # outsurf = tf.clip_by_value(outsurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(outsurf < 1e-10, tf.float32)*1e-10
-    outsurf = outsurf*outsurf
-    outsurf = tf.reduce_max(outsurf, axis = -1)
-    outsurf = tf.reduce_min(outsurf, axis = -1)
+  #   outsurf = dot - h
+  #   outsurf = outsurf * tf.cast(outsurf > 0, tf.float32)
+  #   # outsurf = tf.clip_by_value(outsurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(outsurf < 1e-10, tf.float32)*1e-10
+  #   outsurf = outsurf*outsurf
+  #   outsurf = tf.reduce_max(outsurf, axis = -1)
+  #   outsurf = tf.reduce_min(outsurf, axis = -1)
 
-    insurf = h - dot
+  #   insurf = h - dot
 
-    # isin = tf.cast(insurf >= 0, tf.float32)
-    # isin = tf.reduce_min(isin, axis = -1)
+  #   # isin = tf.cast(insurf >= 0, tf.float32)
+  #   # isin = tf.reduce_min(isin, axis = -1)
 
-    # insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
-    # # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
-    # insurf = insurf*insurf
-    # insurf = tf.reduce_min(insurf, axis = -1)
+  #   # insurf = insurf * tf.cast(insurf >= 0, tf.float32) + tf.cast(insurf < 0, tf.float32)*10
+  #   # # insurf = tf.clip_by_value(insurf, clip_value_min = 1e-10, clip_value_max = 1e+10) - tf.cast(insurf < 1e-10, tf.float32)*1e-10
+  #   # insurf = insurf*insurf
+  #   # insurf = tf.reduce_min(insurf, axis = -1)
 
-    # insurf = insurf * isin
-    insurf = insurf * tf.cast(insurf >= 0, tf.float32)
-    insurf = insurf*insurf
-    insurf = tf.reduce_min(insurf, axis = -1)
-    insurf = tf.reduce_max(insurf, axis = -1)
+  #   # insurf = insurf * isin
+  #   insurf = insurf * tf.cast(insurf >= 0, tf.float32)
+  #   insurf = insurf*insurf
+  #   insurf = tf.reduce_min(insurf, axis = -1)
+  #   insurf = tf.reduce_max(insurf, axis = -1)
 
-    h_loss = tf.reduce_mean(outsurf + 10*insurf)
-    return h_loss
+  #   h_loss = tf.reduce_mean(outsurf + 10*insurf)
+  #   return h_loss
 
   def _compute_overlap_loss(self, overlap):
     overlap_loss = overlap - 1.0
@@ -243,32 +246,37 @@ class MultiConvexNet(keras.Model):
     # in_loss = tf.reduce_mean(in_point)
     return dist_loss
   
-  def _compute_inside_loss(self, surf_distance, surf_points, points):
-    # directions = tf.constant([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1], [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]])
-    # directions = tf.cast(directions, tf.float32)
-    # directions = directions / tf.linalg.norm(directions, axis = -1, keepdims = True)
-    
-    # directions = tf.tile(tf.reshape(directions, [1, 1, 14, 3]), [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1]) # (B,C,14,3)
-    # directions = tf.tile(tf.expand_dims(directions, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,14,3)
-    # directions = tf.transpose(directions, [0, 1, 2, 4, 3]) # (B,C,P,3,14)
-
-    # center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
-    # local_points = tf.expand_dims(points, axis = 1) - center # (B,C,P,3)
-    # local_points = local_points / tf.sqrt(tf.reduce_sum(local_points*local_points, axis = -1, keepdims = True) + 1e-30)
-    # local_points = tf.expand_dims(local_points, axis = 3) # (B,C,P,1,3)
-
-    # in_loss = tf.squeeze(tf.matmul(local_points, directions), axis = -2) # (B,C,P,14)
-    # in_loss = tf.reduce_max(in_loss, axis = -2) # (B,C,14)
-    # in_loss = 1 - in_loss
-    # in_loss = tf.reduce_mean(in_loss)
-
+  def _compute_sample_loss(self, surf_distance, surf_points, points):
     point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
     point_dist = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
-    in_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
-    in_loss = tf.reduce_min(in_loss, axis = 1) # (B,CD,1)
-    in_loss = tf.reduce_mean(in_loss)
+    sample_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
+    sample_loss = tf.reduce_min(sample_loss, axis = 1) # (B,CD,1)
+    sample_loss = tf.reduce_mean(sample_loss)
     
-    return in_loss
+    return sample_loss
+  
+  # def _compute_center_loss(self, directions, vertices, points):
+  #   dir = tf.tile(tf.expand_dims(directions, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,D,3)
+  #   dir = tf.transpose(dir, [0, 1, 2, 4, 3]) # (B,C,P,3,D)
+
+  #   center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
+  #   local_points = tf.expand_dims(points, axis = 1) - center # (B,C,P,3)
+
+  #   local_norm = tf.reduce_sum(local_points*local_points, axis = -1, keepdims = True) # (B,C,P,1)
+
+  #   local_points = local_points / tf.sqrt(local_norm + 1e-30)
+  #   local_points = tf.expand_dims(local_points, axis = 3) # (B,C,P,1,3)
+
+  #   local_norm = tf.tile(local_norm, [1, 1, 1, tf.shape(directions)[2]])
+  #   center_loss = tf.squeeze(tf.matmul(local_points, dir), axis = -2) # (B,C,P,D)
+  #   center_loss = tf.where(local_norm < 1e-30, tf.ones_like(center_loss), center_loss)
+
+  #   center_loss = tf.reduce_max(center_loss, axis = -2) # (B,C,D)
+  #   center_loss = 1 - center_loss
+  #   center_loss = tf.where(center_loss < 0.002, tf.zeros_like(center_loss), center_loss)
+  #   center_loss = tf.reduce_mean(center_loss)
+
+  #   return center_loss
 
 
 

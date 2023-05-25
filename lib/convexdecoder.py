@@ -73,10 +73,10 @@ class ConvexDecoder(keras.layers.Layer):
     mean_vertices = tf.reduce_mean(vertices, axis = 2, keepdims = True)
     local_vertices = vertices - mean_vertices
 
-    direction_h, points, overlap, distance, surf_distance, iter, iter_dist, undef, undef_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
+    direction_h, points, overlap, distance, surf_distance, directions, iter, iter_dist, undef, undef_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
     mean_vertices = tf.reshape(mean_vertices, [tf.shape(mean_vertices)[0], tf.shape(mean_vertices)[1], tf.shape(mean_vertices)[-1]])
 
-    return points, direction_h, overlap, distance, surf_distance, mean_vertices, iter, iter_dist, undef, undef_dist
+    return points, direction_h, overlap, distance, surf_distance, directions, mean_vertices, iter, iter_dist, undef, undef_dist
 
   def _compute_output(self, x, vertices, smoothness, translations, pointcloud):
     """Compute output.
@@ -90,18 +90,18 @@ class ConvexDecoder(keras.layers.Layer):
 
     Returns:
       direction_h: Tensor, [batch_size, n_parts, n_directions, 3 + 1], global directions and h(x).
-      surf_points: Tensor, [batch_size, n_surface_points, 3], output surface point samples.
+      surf_points: Tensor, [batch_size, CD, 3], output surface point samples.
     """
     local_directions = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
     local_directions = tf.tile(local_directions, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
 
     # x = tf.transpose(x, [0, 1])
     x = tf.expand_dims(tf.expand_dims(x, axis = 0), axis = 0)
-    x = tf.tile(x, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1])
+    x = tf.tile(x, [tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1]) # (B,C,D,3)
 
-    h, surf_points = self._compute_spt(x, vertices, smoothness, translations)
+    h, unused_var = self._compute_spt(x, vertices, smoothness, translations) # (B,C,D,1)
     direction_h = tf.concat([local_directions, h], axis = -1)
-    surf_points = tf.reshape(surf_points, [tf.shape(surf_points)[0], -1, tf.shape(surf_points)[-1]])
+    # surf_points = tf.reshape(surf_points, [tf.shape(surf_points)[0], -1, tf.shape(surf_points)[-1]])
 
     # surf_points = self._compute_spt(x, vertices, smoothness, translations, get_h = False)
     # surf_points = tf.zeros((1, 1, 3))
@@ -109,9 +109,13 @@ class ConvexDecoder(keras.layers.Layer):
 
     overlap, iter, undef = self._compute_overlap(vertices, smoothness, translations)
     # retraction, iter_ret, undef_ret, undef_ret_2 = self._compute_retraction(vertices, smoothness, translations, pointcloud)
-    distance, iter_dist, undef_dist = self._compute_distance(vertices, smoothness, translations, pointcloud)
-    surf_distance, unused_var, unused_var2 = self._compute_distance(vertices, smoothness, translations, surf_points) # (B,C,CD,1)
-    surf_distance = tf.reshape(surf_distance, [tf.shape(surf_distance)[0], self._n_parts, self._n_parts, -1, 1])
+    distance, iter_dist, undef_dist = self._compute_distance(vertices, smoothness, translations, tf.tile(tf.expand_dims(pointcloud, axis = 1), [1, self._n_parts, 1, 1]))
+
+    surf_points = self._compute_distance(vertices, smoothness, translations, (x*tf.clip_by_value(tf.reduce_max(h, axis = 2, keepdims = True), clip_value_min = 1e-10, clip_value_max = 10) + translations), get_points = True) # (B,C,D,3)
+    surf_points = tf.reshape(surf_points, [tf.shape(surf_points)[0], -1, 3]) # (B,CD,3)
+    surf_points_2 = tf.tile(tf.expand_dims(surf_points, axis = 1), [1, self._n_parts, 1, 1]) # (B,C,CD,3)
+    surf_distance, unused_var, unused_var2 = self._compute_distance(vertices, smoothness, translations, surf_points_2) # (B,C,CD,1)
+    surf_distance = tf.reshape(surf_distance, [tf.shape(surf_distance)[0], self._n_parts, self._n_parts, -1, 1]) # (B,C,C,D,1)
 
     dist_filter = 100*tf.expand_dims(tf.expand_dims(tf.expand_dims(tf.eye(self._n_parts), axis = -1), axis = -1), axis = 0) # (1,C,C,1,1)
     dist_filter = tf.tile(dist_filter, [tf.shape(surf_distance)[0], 1, 1, tf.shape(surf_distance)[3], 1])
@@ -122,7 +126,7 @@ class ConvexDecoder(keras.layers.Layer):
     # iter_ret = tf.constant([1, 1])
     # undef_ret = tf.constant([[1.0], [1.0]])
 
-    return direction_h, surf_points, overlap, distance, surf_distance, iter, iter_dist, undef, undef_dist
+    return direction_h, surf_points, overlap, distance, surf_distance, x, iter, iter_dist, undef, undef_dist
 
   def _compute_spt(self, x, vertices, smoothness, translations, get_h = True, get_dsdx = False):
     """Compute output.
@@ -674,14 +678,14 @@ class ConvexDecoder(keras.layers.Layer):
 
     return retraction, loop_iter, undef_ret, undef_ret2
 
-  def _compute_distance(self, vertices, smoothness, translations, points):
+  def _compute_distance(self, vertices, smoothness, translations, points, get_points = False):
     """Compute retarction state.
 
     Args:
       vertices: Tensor, [batch_size, n_parts, n_vertices, 3], convex local vertices.
       smoothness: Tensor, [batch_size, n_parts], convex smoothness.
       translations: Tensor, [batch_size, n_parts, 1, 3], convex centers.
-      points: Tensor, [batch_size, n_points, 3], point clouds.
+      points: Tensor, [batch_size, n_parts, n_points, 3], point clouds.
 
     Returns:
       distance: Tensor, [batch_size, n_parts, n_points, 1], minimum distance for each point.
@@ -691,8 +695,8 @@ class ConvexDecoder(keras.layers.Layer):
     undef_ret = tf.constant([[1.0], [1.0]])
     loop_iter = tf.constant([0])
 
-    sp = tf.tile(tf.expand_dims(tf.expand_dims(points, axis = 1), axis = 3), [1, n_c, 1, 1, 1]) # (B,C,P,1,3)
-    o = tf.tile(tf.expand_dims(translations, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,1,3)
+    sp = tf.expand_dims(points, axis = 3) # (B,C,P,1,3)
+    o = tf.tile(tf.expand_dims(translations, axis = 2), [1, 1, tf.shape(points)[2], 1, 1]) # (B,C,P,1,3)
 
     x_fw = tf.squeeze(o, axis = -2) # (B,C,P,3)
     u_fw = tf.squeeze(sp, axis = -2) - x_fw # (B,C,P,3)
@@ -730,7 +734,7 @@ class ConvexDecoder(keras.layers.Layer):
     sig = tf.clip_by_value(tf.squeeze(tf.matmul(sp - s, tf.expand_dims(u_fw, axis = -1)), axis = -1), clip_value_min = self._lb, clip_value_max = self._ub) # (B,C,P,1)
     var = tf.concat([u_fw, sig], axis = -1) # (B,C,P,4)
 
-    tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], n_c, tf.shape(points)[1], 4, 1)) # (B,C,P,4,1)
+    tr_radius = 10.0 * tf.ones((tf.shape(vertices)[0], n_c, tf.shape(points)[2], 4, 1)) # (B,C,P,4,1)
     g_iter = 0
 
     for j in range(10):
@@ -822,7 +826,10 @@ class ConvexDecoder(keras.layers.Layer):
     undef_ret = tf.concat([tf.squeeze(tf.concat([sp, s], axis = -1), axis = -2), u, init_u], axis = -1) # (B,C,P,9(12))
     # undef_ret = res
 
-    return distance, loop_iter, undef_ret
+    if not get_points:
+      return distance, loop_iter, undef_ret
+    else:
+      return tf.squeeze(s, axis = 3) # (B,C,P,3)
 
   def _residual(self, o_bar, i_v, i_p, i_t, vertices, smoothness, translations, var, get_jac = True):
     x = tf.expand_dims(var[:, :, :3], axis = 2)

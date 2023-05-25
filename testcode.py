@@ -28,4 +28,5 @@ keras = tf.keras
 #         print(e)
 
 a = tf.constant([np.nan, 0.0])
-print(a < 0)
+print(np.arccos(0.95) * 180 / np.pi)
+print(np.sin(np.arccos(0.95))*0.25)
