@@ -234,6 +234,7 @@ class MultiConvexNet(keras.Model):
 
   def _compute_overlap_loss(self, overlap):
     overlap_loss = overlap - 1.0
+    # overlap_loss = tf.cast(tf.abs(overlap_loss) > 0.01, tf.float32) * overlap_loss
     overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
     return overlap_loss
   

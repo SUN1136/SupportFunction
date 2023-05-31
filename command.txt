@@ -2,6 +2,7 @@ python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class
 python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class="sphere"
 python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class="L"
 
+tensorboard --logdir=./models/pointcloud/
 
 
 

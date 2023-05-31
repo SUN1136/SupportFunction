@@ -453,20 +453,42 @@ def FW_compute(obj, idx1, point, n_fw, n_g):
     x_fw = o1
     u_fw = point - x_fw
     u_fw = u_fw / np.linalg.norm(u_fw)
+    # print("Iter 0")
+    # print(u_fw)
 
     iter = 0
+    mingap = 10
+    gap = 0
+    prevu = u_fw
     while (True):
         iter += 1
 
         s_fw, unused_var = support_function(v1, p1, u_fw, o1)
+        # print(s_fw)
+        gap = np.linalg.norm(s_fw - point)
+        # print(gap)
+        # print(" ")
+
+        if gap < mingap:
+            prevu = u_fw
+            mingap = gap
+
         x_fw = x_fw + np.dot(s_fw - x_fw, point - x_fw) / np.linalg.norm(x_fw - s_fw)**2 * (s_fw - x_fw)
         u_fw = point - x_fw
         u_fw = u_fw / np.linalg.norm(u_fw)
+        # print("Iter ", iter)
+        # print(u_fw)
         
         if iter >= n_fw:
             break
     
+    # u_fw = np.array([0.098745107650757, 0.528036236763001, 0.843461394309998])
     s1, unused_var = support_function(v1, p1, u_fw, o1)
+    if gap < mingap:
+        prevu = u_fw
+        mingap = gap
+    u_fw = prevu
+    # print(s1)
 
     var = np.zeros((4, ))
     var[:3] = u_fw
@@ -515,6 +537,7 @@ def FW_compute(obj, idx1, point, n_fw, n_g):
         gap = -gap
 
     feature = {"s":[s1, point], "n":normal, "g":gap, "res":res, "iter":iter, "sig":var[3], "nx":np.linalg.norm(var[:3])}
+    # feature = {"s":[s1, point], "n":u_fw, "g":gap}
     return feature
 
 
@@ -527,7 +550,8 @@ data = data.to_numpy()
 
 nc = 2
 nv = 10
-nd = 1742
+# nd = 1742
+nd = 762
 
 p = data[nc*nd+1:nc*nd+1+nc, 0].astype(float)
 v = data[nc*nd+2+nc:nc*nd+2+nc+nc*nv, 0:3].astype(float)
@@ -559,9 +583,9 @@ obj = {"o":[o1, o2], "v":[v1, v2], "p":[p1, p2]}
 # print("Object 1 2")
 # print(feature)
 
-point = np.array([-0.25, -0.222286343574524, -0.186079248785973])
+point = np.array([0.125, -0.237935736775398, -0.310726642608643])
 
-feature = FW_compute(obj, 1, point, 20, 10)
+feature = FW_compute(obj, 0, point, 20, 10)
 print("")
 print("Object 0 1")
 print(feature)

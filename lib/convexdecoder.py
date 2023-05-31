@@ -167,7 +167,7 @@ class ConvexDecoder(keras.layers.Layer):
     # k = tf.tile(k, [1, 1, n_v, 1])
 
     maxz = tf.reduce_max(z, axis = 2, keepdims = True) # (B,C,1,D)
-    maxz = tf.clip_by_value(maxz, clip_value_min = self._lb, clip_value_max = self._ub)
+    maxz = tf.clip_by_value(maxz, clip_value_min = 1e-30, clip_value_max = 1e+30)
     k = 1.0 / maxz
     k2 = k
     k = tf.tile(k, [1, 1, n_v, 1])
@@ -182,11 +182,11 @@ class ConvexDecoder(keras.layers.Layer):
     zm_p = tf.pow(zm, p1)
     sum_zm_p = tf.reduce_sum(zm_p, axis = 2, keepdims = True)
     h = tf.pow(sum_zm_p, 1 / p2)
-    sum_zm = tf.clip_by_value(tf.tile(h, [1, 1, n_v, 1]), clip_value_min = self._lb, clip_value_max = self._ub)
+    sum_zm = tf.clip_by_value(tf.tile(h, [1, 1, n_v, 1]), clip_value_min = 1e-30, clip_value_max = 1e+30)
 
 
     "Compute dh/dx=s"
-    dhdz = tf.clip_by_value(tf.pow((zm / sum_zm), (p1 - 1)), clip_value_min = self._lb, clip_value_max = self._ub)
+    dhdz = tf.clip_by_value(tf.pow((zm / sum_zm), (p1 - 1)), clip_value_min = 1e-30, clip_value_max = 1e+30)
     dhdz_t = tf.transpose(dhdz, [0, 1, 3, 2])
     dhdx = tf.matmul(dhdz_t, vertices)
 
@@ -226,10 +226,10 @@ class ConvexDecoder(keras.layers.Layer):
       k3 = tf.expand_dims(tf.transpose(k2, [0, 1, 3, 2]), axis = -1)
 
       dsdx = (p3 - 1.0) * k3 * dsdx
-      dsdx = tf.clip_by_value(dsdx, clip_value_min = -self._ub, clip_value_max = self._ub)
+      dsdx = tf.clip_by_value(dsdx, clip_value_min = -1e+30, clip_value_max = 1e+30)
 
       if get_h:
-        h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
+        h = tf.clip_by_value(h / k2, clip_value_min = -1e+30, clip_value_max = 1e+30)
         h = tf.transpose(h, [0, 1, 3, 2])
         return h, surf_points, dsdx
       else:
@@ -237,7 +237,7 @@ class ConvexDecoder(keras.layers.Layer):
 
     else:
       if get_h:
-        h = tf.clip_by_value(h / k2, clip_value_min = -self._ub, clip_value_max = self._ub)
+        h = tf.clip_by_value(h / k2, clip_value_min = -1e+30, clip_value_max = 1e+30)
         h = tf.transpose(h, [0, 1, 3, 2])
         return h, surf_points
       else:
@@ -456,6 +456,10 @@ class ConvexDecoder(keras.layers.Layer):
 
       # if noninvertible:
       #   sigma = tf.ones(tf.shape(sigma)) * 0.9
+
+      # gap_filter = tf.squeeze(tf.matmul(o_bar, tf.transpose(s_bar, [0, 1, 3, 2])), axis = -1) > 0 # (B,C,1)
+      # gap = self._safe_norm(s_bar, axis = -1) # (B,C,1)
+      # gap = tf.where(gap_filter, gap, -gap)
 
       overlap_list.append(sigma)
 
@@ -694,13 +698,19 @@ class ConvexDecoder(keras.layers.Layer):
 
     undef_ret = tf.constant([[1.0], [1.0]])
     loop_iter = tf.constant([0])
+    undef_list = []
 
     sp = tf.expand_dims(points, axis = 3) # (B,C,P,1,3)
     o = tf.tile(tf.expand_dims(translations, axis = 2), [1, 1, tf.shape(points)[2], 1, 1]) # (B,C,P,1,3)
 
-    x_fw = tf.squeeze(o, axis = -2) # (B,C,P,3)
-    u_fw = tf.squeeze(sp, axis = -2) - x_fw # (B,C,P,3)
+    x_fw = tf.squeeze(o, axis = 3) # (B,C,P,3)
+    u_fw = tf.squeeze(sp, axis = 3) - x_fw # (B,C,P,3)
     u_fw = u_fw / self._safe_norm(u_fw, axis = -1, keepdims = True)
+    undef_list.append(tf.expand_dims(u_fw, axis = -1))
+
+    min_u = u_fw
+    min_gap = 100*tf.ones_like(u_fw)
+    gap = tf.zeros_like(u_fw)
 
 
     "FW Initialization"
@@ -709,8 +719,14 @@ class ConvexDecoder(keras.layers.Layer):
       iter += 1
       
       s_fw = self._compute_spt(u_fw, vertices, smoothness, translations, get_h = False) # (B,C,P,3)
+
+      gap = tf.tile(tf.linalg.norm((tf.squeeze(sp, axis = -2) - s_fw), axis = -1, keepdims = True), [1, 1, 1, 3])
+      gap_filter = gap < min_gap
+      min_u = tf.where(gap_filter, u_fw, min_u)
+      min_gap = tf.where(gap_filter, gap, min_gap)
+
       prev_x = x_fw
-      x_fw = x_fw + tf.squeeze(tf.matmul(tf.expand_dims(s_fw - x_fw, axis = -2), tf.expand_dims(tf.squeeze(sp, axis = -2) - x_fw, axis = -1)), axis = -1) / tf.linalg.norm(s_fw - x_fw, axis = -1, keepdims = True) * (s_fw - x_fw)
+      x_fw = x_fw + tf.squeeze(tf.matmul(tf.expand_dims(s_fw - x_fw, axis = -2), tf.expand_dims(tf.squeeze(sp, axis = -2) - x_fw, axis = -1)), axis = -1) / tf.linalg.norm((s_fw - x_fw), axis = -1, keepdims = True)**2 * (s_fw - x_fw)
 
       x_finite = tf.is_finite(s_fw - x_fw)
       x_filter = tf.tile(tf.linalg.norm(s_fw - x_fw, axis = -1, keepdims = True), [1, 1, 1, 3]) < 1e-30
@@ -723,12 +739,20 @@ class ConvexDecoder(keras.layers.Layer):
       u_fw = tf.where(tf.logical_or(u_filter, tf.logical_not(u_finite)), prev_u, u_fw)
 
       u_fw = u_fw / tf.linalg.norm(u_fw, axis = -1, keepdims = True)
-      
+      undef_list.append(tf.expand_dims(u_fw, axis = -1))
+    
+    undef_ret = tf.concat(undef_list, axis = -1) # (B,C,P,3,31)
     loop_iter = iter
 
     init_u = u_fw
     s = self._compute_spt(u_fw, vertices, smoothness, translations, get_h=False) # (B,C,P,3)
+
+    gap = tf.tile(tf.linalg.norm((tf.squeeze(sp, axis = -2) - s), axis = -1, keepdims = True), [1, 1, 1, 3])
+    gap_filter = gap < min_gap
+    u_fw = tf.where(gap_filter, u_fw, min_u)
+    
     s = tf.expand_dims(s, axis = 3) # (B,C,P,1,3)
+
 
     "Growth Model"
     sig = tf.clip_by_value(tf.squeeze(tf.matmul(sp - s, tf.expand_dims(u_fw, axis = -1)), axis = -1), clip_value_min = self._lb, clip_value_max = self._ub) # (B,C,P,1)
@@ -762,7 +786,7 @@ class ConvexDecoder(keras.layers.Layer):
 
         dN = -tf.matmul(jac_inv, f) # (B,C,P,4,1)
         grad = tf.matmul(tf.transpose(jac, [0, 1, 2, 4, 3]), f) # (B,C,P,4,1)
-        dC = - tf.clip_by_value((tf.reduce_sum(grad*grad, axis = [-2, -1], keepdims = True)) / (tf.reduce_sum(tf.matmul(jac, grad)*tf.matmul(jac, grad), axis = [-2, -1], keepdims = True) + self._lb), clip_value_min = self._lb, clip_value_max = self._ub) * grad
+        dC = - tf.reduce_sum(grad*grad, axis = [-2, -1], keepdims = True) / (tf.reduce_sum(tf.matmul(jac, grad)*tf.matmul(jac, grad), axis = [-2, -1], keepdims = True) + 1e-30) * grad
         dD = self._dogleg_ret(dN, dC, tr_radius) # (B,C,P,4,1)
 
         f_next = self._residual_distance(sp, o, vertices, smoothness, translations, var + tf.squeeze(dD, axis = -1), get_jac = False) # (B,C,P,4,1)
@@ -773,12 +797,12 @@ class ConvexDecoder(keras.layers.Layer):
 
         red_filter = tf.logical_and(predict_red < 1e-20, predict_red > -1e-20) # (B,C,P,1)
         # rho = tf.clip_by_value(actual_red / tf.where(tf.abs(predict_red) < 1e-10, 1e-10*tf.ones(tf.shape(predict_red)), tf.abs(predict_red)), clip_value_min = self._lb, clip_value_max = self._ub)
-        rho = actual_red / tf.abs(predict_red)
+        rho = actual_red / predict_red
 
         large_rho = 1e+10 * tf.ones(tf.shape(rho))
         rho = tf.tile(tf.expand_dims(tf.where(red_filter, large_rho, rho), axis = -1), [1, 1, 1, 4, 1]) # (B,C,P,4,1)
 
-        tr_filter1 = rho < 0.001
+        tr_filter1 = rho < 0.05
         tr_filter2 = rho > 0.9
         dD_norm = tf.tile(tf.linalg.norm(dD, axis = [-2, -1], keepdims = True), [1, 1, 1, 4, 1]) # (B,C,P,4,1)
 
@@ -790,7 +814,7 @@ class ConvexDecoder(keras.layers.Layer):
         tr_radius = tf.where(tr_filter2, tf.reduce_max(tf.concat([tr_radius, 3*dD_norm], axis = -1), axis = -1, keepdims = True), tr_radius) # (B,C,P,4,1)
         # tr_radius = tf.clip_by_value(tr_radius, clip_value_min = 1e-10, clip_value_max = 1000)
 
-        var_filter = tf.squeeze(rho, axis = -1) > 0.001 # (B,C,P,4)
+        var_filter = tf.squeeze(rho, axis = -1) > 0.05 # (B,C,P,4)
         var = tf.where(var_filter, var + tf.squeeze(dD, axis = -1), var) # (B,C,P,4)
         # var = tf.concat([var[:, :, :, :3] / self._safe_norm(var[:, :, :, :3], axis = -1, keepdims = True), var[:, :, :, 3:4]], axis = -1)
 
@@ -823,7 +847,7 @@ class ConvexDecoder(keras.layers.Layer):
     "End of Loop"
     distance = tf.squeeze(tf.matmul((sp - s), tf.expand_dims(u, axis = -1)), axis = -1) # (B,C,P,1)
 
-    undef_ret = tf.concat([tf.squeeze(tf.concat([sp, s], axis = -1), axis = -2), u, init_u], axis = -1) # (B,C,P,9(12))
+    undef_ret = tf.concat([undef_ret, tf.transpose(sp, [0, 1, 2, 4, 3]), tf.transpose(s, [0, 1, 2, 4, 3]), tf.expand_dims(u, axis = -1), tf.expand_dims(init_u, axis = -1)], axis = -1) # (B,C,P,3,31+4)
     # undef_ret = res
 
     if not get_points:
@@ -844,7 +868,7 @@ class ConvexDecoder(keras.layers.Layer):
       jac = tf.expand_dims(var[:, :, 3:4], axis = -1) * tf.squeeze(dsdx1 + dsdx2, axis = 2)
       jac = tf.concat([jac, tf.transpose(s1 - s2 + o_bar, [0, 1, 3, 2])], axis = -1)
       jac = tf.concat([jac, tf.concat([2.0*x, tf.zeros((tf.shape(vertices)[0], tf.shape(vertices)[1], 1, 1))], axis = -1)], axis = -2)
-      jac = tf.clip_by_value(jac, clip_value_min = -self._ub, clip_value_max = self._ub)
+      jac = tf.clip_by_value(jac, clip_value_min = -1e-30, clip_value_max = 1e+30)
       return f, jac
     else:
       return f
@@ -884,7 +908,7 @@ class ConvexDecoder(keras.layers.Layer):
       jac = -tf.squeeze(dsdx, axis = 3) - tf.expand_dims(var[:, :, :, 3:4], axis = -1)*tf.reshape(tf.eye(3), [1, 1, 1, 3 ,3]) # (B,C,P,3,3)
       jac = tf.concat([jac, -tf.transpose(x, [0, 1, 2, 4, 3])], axis = -1) # (B,C,P,3,4)
       jac = tf.concat([jac, tf.concat([2.0*x, tf.zeros((tf.shape(vertices)[0], self._n_parts, tf.shape(sp)[2], 1, 1))], axis = -1)], axis = -2) # (B,C,P,4,4)
-      jac = tf.clip_by_value(jac, clip_value_min = -self._ub, clip_value_max = self._ub)
+      jac = tf.clip_by_value(jac, clip_value_min = -1e+30, clip_value_max = 1e+30)
       return f, jac
     else:
       return f
@@ -897,7 +921,7 @@ class ConvexDecoder(keras.layers.Layer):
 
     a = tf.tile(tf.linalg.norm(dN - dC, axis = [-2, -1], keepdims = True), [1, 1, 4, 1])
     a = a*a
-    a_filter = a > 1e+20
+    a_filter = a > 1e+30
     a = tf.clip_by_value(a, clip_value_min = 1e-20, clip_value_max = 1e+20)
     b = tf.matmul(tf.transpose(dC, [0, 1, 3, 2]), dN - dC)
     c = b*b - a*(tf.reduce_sum(dC*dC, axis = [-2, -1], keepdims = True) - tr_radius*tr_radius)
@@ -919,8 +943,8 @@ class ConvexDecoder(keras.layers.Layer):
 
     a = tf.tile(tf.linalg.norm(dN - dC, axis = [-2, -1], keepdims = True), [1, 1, 1, 4, 1]) # (B,C,P,4,1)
     a = a*a
-    a_filter = a > 1e+20
-    a = tf.clip_by_value(a, clip_value_min = 1e-20, clip_value_max = 1e+20) # (B,C,P,4,1)
+    a_filter = a > 1e+30
+    a = tf.clip_by_value(a, clip_value_min = 1e-30, clip_value_max = 1e+30) # (B,C,P,4,1)
     b = tf.matmul(tf.transpose(dC, [0, 1, 2, 4, 3]), dN - dC) # (B,C,P,1,1)
     c = b*b - a*(tf.reduce_sum(dC*dC, axis = [-2, -1], keepdims = True) - tr_radius*tr_radius) # (B,C,P,4,1)
     tau = (-b + tf.sqrt(tf.abs(c))) / a # (B,C,P,4,1)
