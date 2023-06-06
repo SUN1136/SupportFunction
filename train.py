@@ -138,27 +138,29 @@ def main(unused_argv):
           for i in range(overlap_var.shape[0]):
             fout.write("{}\n".format(overlap_var[i]))
 
-          fout.write("Minimum 0\n")
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2, 21]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2, 22]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0 ,23], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2 ,23]))
-          fout.write("Minimum 1\n")
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 21]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 22]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 23]))
-          fout.write("Maximum 0\n")
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 21]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 22]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 23]))
-          fout.write("Maximum 1\n")
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 21]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 22]))
-          fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 23]))
+          # fout.write("Minimum 0\n")
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2, 21]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2, 22]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0 ,23], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2 ,23]))
+          # fout.write("Minimum 1\n")
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 21]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 22]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 2, 23]))
+          # fout.write("Maximum 0\n")
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 21]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 22]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, 23]))
+          # fout.write("Maximum 1\n")
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 21]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 22], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 22], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 22]))
+          # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, 23], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, 23], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, 23]))
           
-          for j in range(21):
-            fout.write("Iter {}\n".format(j))
-            fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, j], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, j], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, j]))
-            fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, j], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, j], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, j]))
+          # for j in range(21):
+          #   fout.write("Iter {}\n".format(j))
+          #   fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 0, j], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 1, j], undef_dist_var[0, 0, np.argmax(distance_var[0, :, 0]), 2, j]))
+          #   fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 0, j], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 1, j], undef_dist_var[0, 1, np.argmax(distance_var[0, :, 0]), 2, j]))
+
+
 
           # for j in range(2):
           #   fout.write("Maximum Data {}\n".format(j))
