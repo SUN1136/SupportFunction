@@ -79,32 +79,24 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
 
-    out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
+    # out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
+    #   beta, points, training=training)
+    overlap, distance, vertices, smoothness, directions, surf_distance, surf_points = self.decode(
       beta, points, training=training)
 
-    # h_loss = self._compute_h_loss(points, direction_h, trans)
     dist_loss = self._compute_distance_loss(distance)
-    # s_loss = self._compute_sample_loss(points, out_points)
     overlap_loss = self._compute_overlap_loss(overlap)
-    sample_loss = self._compute_sample_loss(surf_distance, out_points, points)
-    # center_loss = self._compute_center_loss(directions, vertices, points)
+    sample_loss = self._compute_sample_loss(surf_distance, surf_points, points)
+    # center_loss = self._compute_center_loss(vertices)
+    center_loss = self._compute_center_loss(directions, vertices, points)
+    # inside_loss = self._compute_inside_loss(distance)
 
-    # loss = dist_loss + 0.1*overlap_loss
-    loss = dist_loss + 0.1*overlap_loss + sample_loss
-
-    # loss = h_loss + s_loss + 0.1*overlap_loss
-    # loss = h_loss + s_loss
+    loss = dist_loss + 0.1*overlap_loss + sample_loss + 0.1*center_loss
+    # loss = dist_loss + 0.1*overlap_loss + center_loss + inside_loss
 
     if training:
       tf.summary.scalar("loss", loss)
-      # tf.summary.scalar("x", tf.shape(vertices)[0])
-      # tf.summary.scalar("y", tf.shape(vertices)[1])
-      # tf.summary.scalar("z", tf.shape(vertices)[2])
       tf.summary.scalar("p1", smoothness[0, 0])
-      # tf.summary.scalar("p2", smoothness[0, 1])
-      # tf.summary.scalar("x", out_points[0, 0, 0])
-      # tf.summary.scalar("y", out_points[0, 0, 1])
-      # tf.summary.scalar("z", out_points[0, 0, 2])
 
     if training:
       global_step = tf.train.get_or_create_global_step()
@@ -119,7 +111,8 @@ class MultiConvexNet(keras.Model):
         gradients, unused_var = tf.clip_by_global_norm(gradients, 1.0)
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
-      return loss, train_op, global_step, out_points, vertices, smoothness, points, overlap, distance, iter, iter_dist, undef, undef_dist
+      # return loss, train_op, global_step, out_points, vertices, smoothness, points, overlap, distance, iter, iter_dist, undef, undef_dist
+      return loss, train_op, global_step, vertices, smoothness, overlap
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -151,8 +144,10 @@ class MultiConvexNet(keras.Model):
       out_points: Tensor, [batch_size, n_out_points, 3], output surface point samples.
     """
     vertices, smoothness = self._split_params(params)
-    out_points, direction_h, overlap, distance, surf_distance, directions, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
-    return out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
+    # out_points, direction_h, overlap, distance, surf_distance, directions, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
+    overlap, distance, directions, surf_distance, surf_points = self.cvx(vertices, smoothness, pointcloud)
+    # return out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
+    return overlap, distance, vertices, smoothness, directions, surf_distance, surf_points
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -168,13 +163,78 @@ class MultiConvexNet(keras.Model):
 
   def _clamp_params(self, vertices, smoothness, vert_mag, max_p):
     vert = tf.tanh(vertices * vert_mag) / 2
-    # vertices = tf.sigmoid(50*vertices) - 0.5
-    # mask = tf.ones(tf.shape(p)) * 1e-20
-    # p = tf.where(tf.is_nan(p), mask, p)
     p = (tf.tanh(smoothness) + 1) * max_p / 2 + 2
-    # p = tf.nn.sigmoid(smoothness) * max_p + 1
     return vert, p
 
+  def _compute_overlap_loss(self, overlap):
+    overlap_loss = overlap - 1.0
+    overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
+    return overlap_loss
+  
+  def _compute_distance_loss(self, distance):
+    dist_loss = tf.reduce_min(tf.abs(distance), axis = 1)
+    # dist_loss = tf.reduce_min(tf.tanh(10*distance), axis = 1)
+    dist_loss = tf.reduce_mean(dist_loss)
+    return dist_loss
+  
+  def _compute_inside_loss(self, distance):
+    inside_loss = tf.reduce_min(distance, axis = 1) # (B,P,1)
+    # inside_loss = tf.reduce_min(tf.tanh(10*distance), axis = 1) # (B,P,1)
+    inside_loss = tf.cast(inside_loss < 0, tf.float32) * inside_loss
+    inside_loss = tf.reduce_mean(tf.abs(inside_loss))
+    return inside_loss
+  
+  def _compute_sample_loss(self, surf_distance, surf_points, points):
+    point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
+    point_dist = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
+    sample_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
+    # sample_loss = tf.concat([tf.tanh(10*surf_distance)**2, tf.tanh(10*tf.sqrt(point_dist + 1e-30))**2], axis = 1) # (B,C+P,CD,1)
+    sample_loss = tf.reduce_min(sample_loss, axis = 1) # (B,CD,1)
+    sample_loss = tf.reduce_mean(sample_loss)
+    
+    return sample_loss
+
+  # def _compute_center_loss(self, vertices):
+  #   center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
+  #   center_diff = tf.transpose(center, [0, 2, 1, 3]) - center # (B,C,C,3)
+  #   center_diff = tf.reduce_sum(center_diff**2, axis = -1, keepdims = True) # (B,C,C,1)
+
+  #   eye_filter = tf.expand_dims(tf.expand_dims(tf.eye(tf.shape(vertices)[1]), axis = -1), axis = 0) # (1,C,C,1)
+  #   eye_filter = tf.tile(eye_filter, [tf.shape(vertices)[0], 1, 1, 1]) > 0.5 # (B,C,C,1)
+
+  #   center_diff = tf.where(eye_filter, 10*tf.ones_like(center_diff), center_diff)
+
+  #   min_diff = tf.reduce_min(center_diff, axis = 2) # (B,C,1)
+  #   min_diff = tf.sqrt(min_diff + 1e-10)
+  #   mean_diff = tf.reduce_mean(min_diff, axis = 1, keepdims = True) # (B,1,1)
+  #   center_loss = tf.reduce_mean((min_diff - mean_diff)**2)
+    
+  #   return center_loss
+
+  def _compute_center_loss(self, directions, vertices, points):
+    dir = tf.tile(tf.expand_dims(directions, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,D,3)
+    dir = tf.transpose(dir, [0, 1, 2, 4, 3]) # (B,C,P,3,D)
+
+    center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
+    local_points = tf.expand_dims(points, axis = 1) - center # (B,C,P,3)
+
+    local_norm = tf.reduce_sum(local_points*local_points, axis = -1, keepdims = True) # (B,C,P,1)
+
+    local_points = local_points / tf.sqrt(local_norm + 1e-30)
+    local_points = tf.expand_dims(local_points, axis = 3) # (B,C,P,1,3)
+
+    local_norm = tf.tile(local_norm, [1, 1, 1, tf.shape(directions)[2]])
+    # local_norm = tf.squeeze(local_norm, axis = -1) # (B,C,P)
+    center_loss = tf.squeeze(tf.matmul(local_points, dir), axis = -2) # (B,C,P,D)
+    center_loss = tf.where(local_norm < 1e-8, tf.ones_like(center_loss), center_loss)
+
+    center_loss = tf.reduce_max(center_loss, axis = -2) # (B,C,D)
+    center_loss = 1 - center_loss
+    # center_loss = tf.cast(center_loss > 0.02, tf.float32) * center_loss
+    center_loss = tf.reduce_mean(center_loss*center_loss)
+
+    return center_loss
+  
   # def _compute_sample_loss(self, gt, output):
   #   gt = tf.expand_dims(gt, axis = 1)
   #   output = tf.expand_dims(output, axis = 2)
@@ -231,53 +291,6 @@ class MultiConvexNet(keras.Model):
 
   #   h_loss = tf.reduce_mean(outsurf + 10*insurf)
   #   return h_loss
-
-  def _compute_overlap_loss(self, overlap):
-    overlap_loss = overlap - 1.0
-    # overlap_loss = tf.cast(tf.abs(overlap_loss) > 0.01, tf.float32) * overlap_loss
-    overlap_loss = tf.reduce_mean(overlap_loss * overlap_loss)
-    return overlap_loss
-  
-  def _compute_distance_loss(self, distance):
-    min_dist = tf.reduce_min(tf.abs(distance), axis = 1)
-    dist_loss = min_dist
-    dist_loss = tf.reduce_mean(dist_loss)
-
-    # in_point = -distance * tf.cast(distance < 0, tf.float32)
-    # in_loss = tf.reduce_mean(in_point)
-    return dist_loss
-  
-  def _compute_sample_loss(self, surf_distance, surf_points, points):
-    point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
-    point_dist = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
-    sample_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
-    sample_loss = tf.reduce_min(sample_loss, axis = 1) # (B,CD,1)
-    sample_loss = tf.reduce_mean(sample_loss)
-    
-    return sample_loss
-  
-  # def _compute_center_loss(self, directions, vertices, points):
-  #   dir = tf.tile(tf.expand_dims(directions, axis = 2), [1, 1, tf.shape(points)[1], 1, 1]) # (B,C,P,D,3)
-  #   dir = tf.transpose(dir, [0, 1, 2, 4, 3]) # (B,C,P,3,D)
-
-  #   center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
-  #   local_points = tf.expand_dims(points, axis = 1) - center # (B,C,P,3)
-
-  #   local_norm = tf.reduce_sum(local_points*local_points, axis = -1, keepdims = True) # (B,C,P,1)
-
-  #   local_points = local_points / tf.sqrt(local_norm + 1e-30)
-  #   local_points = tf.expand_dims(local_points, axis = 3) # (B,C,P,1,3)
-
-  #   local_norm = tf.tile(local_norm, [1, 1, 1, tf.shape(directions)[2]])
-  #   center_loss = tf.squeeze(tf.matmul(local_points, dir), axis = -2) # (B,C,P,D)
-  #   center_loss = tf.where(local_norm < 1e-30, tf.ones_like(center_loss), center_loss)
-
-  #   center_loss = tf.reduce_max(center_loss, axis = -2) # (B,C,D)
-  #   center_loss = 1 - center_loss
-  #   center_loss = tf.where(center_loss < 0.002, tf.zeros_like(center_loss), center_loss)
-  #   center_loss = tf.reduce_mean(center_loss)
-
-  #   return center_loss
 
 
 

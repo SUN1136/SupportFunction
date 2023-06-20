@@ -4,5 +4,10 @@ python train.py --train_dir=./models/pointcloud --data_dir=./dataset --obj_class
 
 tensorboard --logdir=./models/pointcloud/
 
+airplane_0634
+chair_0894
+sofa_0682
 
+python train.py --train_dir=./models/pointcloud --data_dir=./dataset/airplane --obj_class="airplane_0"
 
+dmesg | grep -E -i -B100 'killed process'

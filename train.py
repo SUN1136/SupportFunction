@@ -14,18 +14,24 @@ from lib import utils
 
 tf.disable_eager_execution()
 
-gpus = tf2.config.experimental.list_physical_devices('GPU')
+gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
         # memory limit 10 times increased
-        # tf2.config.experimental.set_virtual_device_configuration(gpus[0], [tf2.config.experimental.VirtualDeviceConfiguration(memory_limit=1500000)])
-        tf2.config.experimental.set_memory_growth(gpus[0], True)
+        # tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=10240)])
+        for gpu in gpus:
+          tf.config.experimental.set_memory_growth(gpu, True)
+        # logical_gpus = tf2.config.experimental.list_logical_devices('GPU')
         print("\n----------GPU Loaded----------\n")
     except RuntimeError as e:
         print(e)
 
 logging = tf.logging
 tf.logging.set_verbosity(tf.logging.INFO)
+
+# config = tf.ConfigProto()
+# config.gpu_options.allow_growth = True
+# config.gpu_options.per_process_gpu_memory_fraction = 0.8
 
 flags = utils.define_flags()
 FLAGS = flags.FLAGS
@@ -48,7 +54,9 @@ def main(unused_argv):
   # optimizer = tf.train.AdamOptimizer(FLAGS.lr)
 
   # Set up the graph
-  train_loss, train_op, global_step, out_points, vert, smooth, points, overlap, distance, iter, iter_dist, undef, undef_dist = model.compute_loss(
+  # train_loss, train_op, global_step, out_points, vert, smooth, points, overlap = model.compute_loss(
+  #     batch, training=True, optimizer=tf.train.AdamOptimizer)
+  train_loss, train_op, global_step, vert, smooth, overlap = model.compute_loss(
       batch, training=True, optimizer=tf.train.AdamOptimizer)
 
   # Training hooks
@@ -56,12 +64,14 @@ def main(unused_argv):
   summary_writer = tf.summary.FileWriter(FLAGS.train_dir)
   ops = tf.get_collection(tf.GraphKeys.SUMMARIES)
   summary_hook = tf.train.SummarySaverHook(
-      save_steps=1, summary_writer=summary_writer, summary_op=ops)
+      save_steps=1000, summary_writer=summary_writer, summary_op=ops)
   step_counter_hook = tf.train.StepCounterHook(summary_writer=summary_writer)
   hooks = [stop_hook, step_counter_hook, summary_hook]
 
   sing_list = []
   sing = 0
+  v_list = []
+  p_list = []
   logging.info("=> Start training loop ...")
   log_count = 1000
   with tf.train.MonitoredTrainingSession(
@@ -72,27 +82,30 @@ def main(unused_argv):
       save_checkpoint_secs=None,
       save_summaries_steps=None,
       save_summaries_secs=None,
+      # config = config,
       log_step_count_steps=log_count,
       max_wait_secs=3600) as mon_sess:
 
     while not mon_sess.should_stop():
-      unused_var, loss_var, step_var, unused_var4, out_var, vert_var, smooth_var, points_var, overlap_var, distance_var, iter_var, iter_dist_var, undef_var, undef_dist_var = mon_sess.run(
-        [batch, train_loss, global_step, train_op, out_points, vert, smooth, points, overlap, distance, iter, iter_dist, undef, undef_dist])
-      distance_var = np.min(np.abs(distance_var), axis = 1)
+      # unused_var, loss_var, step_var, unused_var4, out_var, vert_var, smooth_var, points_var, overlap_var = mon_sess.run(
+      #   [batch, train_loss, global_step, train_op, out_points, vert, smooth, points, overlap])
+      unused_var, loss_var, step_var, unused_var4, vert_var, smooth_var, overlap_var = mon_sess.run(
+        [batch, train_loss, global_step, train_op, vert, smooth, overlap])
+      # distance_var = np.min(np.abs(distance_var), axis = 1)
       if step_var % 100 == 0:
         print("")
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
-        print("Smoothness: ", smooth_var[0, :])
-        print("Growth Ratio: ", overlap_var[0, :, 0])
-        print("Distances: ", np.array([np.min(distance_var), np.max(distance_var)]))
+        # print("Smoothness: ", smooth_var[0, :])
+        # print("Growth Ratio: ", overlap_var[0, :, 0])
+        # print("Distances: ", np.array([np.min(distance_var), np.max(distance_var)]))
         # print("Undef: ", undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 9], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 10], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 11])
         # print("Undef: ", undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 9], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 10], undef_dist_var[0, 1, np.argmin(distance_var[0, :, 0]), 11])
         # print("Retraction Quantile: ", np.quantile(retraction_var[0, :, 0], 0.25), np.quantile(retraction_var[0, :, 0], 0.5), np.quantile(retraction_var[0, :, 0], 0.75))
         # print("Retraction Mean: ", np.mean(retraction_var[0, :, 0]))
-        print("Distance Divergence: ", np.sum((distance_var > 0.1)*1))
+        # print("Distance Divergence: ", np.sum((distance_var > 0.1)*1))
         # print("Retraction Points: ", np.array([points_var[0, np.argmin(retraction_var[0, :, 0]), :], points_var[0, np.argmax(retraction_var[0, :, 0]), :]]))
-        print("Loop Iter: ", iter_var)
-        print("Distance Loop Iter: ", iter_dist_var)
+        # print("Loop Iter: ", iter_var)
+        # print("Distance Loop Iter: ", iter_dist_var)
         # print("Undef: ", undef_var)
         # print("Retraction Undef: ", undef_ret_var)
         # print("Retraction Undef: ", undef_ret_var[0, :, np.argmin(retraction_var[0, :, 0]), :], undef_ret_var[0, :, np.argmax(retraction_var[0, :, 0]), :])
@@ -100,43 +113,61 @@ def main(unused_argv):
         print("")
         sing_list.append(sing)
         sing = 0
-      if undef_var[0, 0, -1, 0] != 0:
-        print("")
-        print("----------Singularity----------")
-        print("Step: ", step_var, "\t\tLoss: ", loss_var)
-        print("Smoothness: ", smooth_var[0, :])
-        print("Growth Ratio: ", overlap_var[0, :, 0])
-        print("Loop Iter: ", iter_var)
-        print("Undef: ", undef_var)
-        print("")
-        sing += 1
+      # if undef_var[0, 0, -1, 0] != 0:
+      #   print("")
+      #   print("----------Singularity----------")
+      #   print("Step: ", step_var, "\t\tLoss: ", loss_var)
+      #   # print("Smoothness: ", smooth_var[0, :])
+      #   # print("Growth Ratio: ", overlap_var[0, :, 0])
+      #   # print("Loop Iter: ", iter_var)
+      #   # print("Undef: ", undef_var)
+      #   print("")
+      #   sing += 1
+      if step_var % 1000 == 0:
+        v_list.append(vert_var[0, ...].reshape(-1, 3))
+        p_list.append(smooth_var[0, :])
+
       if step_var >= FLAGS.max_steps - 1:
         sing_list = np.array(sing_list)
         print("")
         print("Singularity result: ", sing_list)
         print("")
         
-        out_var = out_var[0, :, :]
+        # out_var = out_var[0, :, :]
         smooth_var = smooth_var[0, :]
         vert_var = vert_var[0, ...].reshape(-1, 3)
-        points_var = points_var[0, ...]
+        # points_var = points_var[0, ...]
         overlap_var = overlap_var[0, :, 0]
         with tf.io.gfile.GFile(path.join(FLAGS.train_dir, "stats.csv"), "w") as fout:
-          fout.write("x,y,z\n")
-          for i in range(out_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(out_var[i, 0], out_var[i, 1], out_var[i, 2]))
-          fout.write("p\n")
+          fout.write("p, , \n")
           for i in range(smooth_var.shape[0]):
-            fout.write("{}\n".format(smooth_var[i]))
+            fout.write("{0},{1},{2}\n".format(smooth_var[i], 0.0, 0.0))
           fout.write("vertex\n")
           for i in range(vert_var.shape[0]):
             fout.write("{0},{1},{2}\n".format(vert_var[i, 0], vert_var[i, 1], vert_var[i, 2]))
-          fout.write("dataset\n")
-          for i in range(points_var.shape[0]):
-            fout.write("{0},{1},{2}\n".format(points_var[i, 0], points_var[i, 1], points_var[i, 2]))
+          # fout.write("dataset\n")
+          # for i in range(points_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(points_var[i, 0], points_var[i, 1], points_var[i, 2]))
           fout.write("overlap\n")
           for i in range(overlap_var.shape[0]):
             fout.write("{}\n".format(overlap_var[i]))
+          # fout.write("x,y,z\n")
+          # for i in range(out_var.shape[0]):
+          #   fout.write("{0},{1},{2}\n".format(out_var[i, 0], out_var[i, 1], out_var[i, 2]))
+
+        v_list = np.array(v_list)
+        p_list = np.array(p_list)
+        with tf.io.gfile.GFile(path.join(FLAGS.train_dir, "v_p.csv"), "w") as fout:
+          fout.write("size,{0},{1}\n".format(0.0, 0.0))
+          fout.write("{0},{1},{2}\n".format(v_list.shape[0], 0.0, 0.0))
+          fout.write("p,{0},{1}\n".format(0.0, 0.0))
+          for i in range(p_list.shape[0]):
+            for j in range(p_list.shape[1]):
+              fout.write("{0},{1},{2}\n".format(p_list[i, j], 0.0, 0.0))
+          fout.write("vertex\n")
+          for i in range(v_list.shape[0]):
+            for j in range(v_list.shape[1]):
+              fout.write("{0},{1},{2}\n".format(v_list[i, j, 0], v_list[i, j, 1], v_list[i, j, 2]))
 
           # fout.write("Minimum 0\n")
           # fout.write("{0},{1},{2}\n".format(undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 0, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 1, 21], undef_dist_var[0, 0, np.argmin(distance_var[0, :, 0]), 2, 21]))

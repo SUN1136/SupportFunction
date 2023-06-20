@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 import tensorflow as tf2
 import os
+from pyntcloud import PyntCloud
 keras = tf.keras
 
 # x = keras.Sequential()
@@ -27,6 +28,10 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-a = tf.constant([np.nan, 0.0])
-print(np.arccos(0.95) * 180 / np.pi)
-print(np.sin(np.arccos(0.95))*0.25)
+def add(x, y):
+    return x + y
+
+x = tf.constant([1.0, 2.0])
+y = tf.constant([3.0, 5.0])
+z = tf.tidy(add(x, y))
+print(z)

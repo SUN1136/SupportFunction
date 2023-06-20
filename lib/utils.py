@@ -32,7 +32,7 @@ def define_flags():
   
   # Model flags
   flags.DEFINE_string("model", "multiconvex", "Name of the model.")
-  flags.DEFINE_integer("n_parts", 2, "Number of convexes uesd.")
+  flags.DEFINE_integer("n_parts", 20, "Number of convexes uesd.")
   flags.DEFINE_integer("n_vertices", 20, "Number of vertices uesd.")
   flags.DEFINE_integer("latent_size", 128, "The size of latent code.")
   # flags.DEFINE_integer("dims", 3, "The dimension of query points.")
@@ -51,9 +51,9 @@ def define_flags():
   flags.DEFINE_string(
       "train_dir", None, "The base directory to save training info and"
       "checkpoints.")
-  flags.DEFINE_integer("save_every", 20000,
+  flags.DEFINE_integer("save_every", 25000,
                        "The number of steps to save checkpoint.")
-  flags.DEFINE_integer("max_steps", 10000, "The number of steps of training.")
+  flags.DEFINE_integer("max_steps", 50000, "The number of steps of training.")
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
   flags.DEFINE_integer("sample_point", 1024, "The number of sample points.")
   flags.DEFINE_integer("n_convex_altitude", 21, "The output surface resolution angle degrees.")
