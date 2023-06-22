@@ -25,6 +25,8 @@ from lib import convexdecoder
 
 keras = tf.keras
 
+from time import time
+
 
 def get_model(model_name, args):
   return model_dict[model_name](args)
@@ -79,20 +81,35 @@ class MultiConvexNet(keras.Model):
     if not self._image_input:
       beta = self.encode(points, training=training)
 
+    dt = []
+    prev_time = time()
     # out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
     #   beta, points, training=training)
     overlap, distance, vertices, smoothness, directions, surf_distance, surf_points = self.decode(
       beta, points, training=training)
+    dt.append(tf.constant(time()-prev_time))
 
+    prev_time = time()
     dist_loss = self._compute_distance_loss(distance)
+    dt.append(tf.constant(time()-prev_time))
+    
+    prev_time = time()
     overlap_loss = self._compute_overlap_loss(overlap)
+    dt.append(tf.constant(time()-prev_time))
+
+    prev_time = time()
     sample_loss = self._compute_sample_loss(surf_distance, surf_points, points)
+    dt.append(tf.constant(time()-prev_time))
+    # sample_loss = self._compute_sample_loss(surf_points, points)
     # center_loss = self._compute_center_loss(vertices)
+
+    prev_time = time()
     center_loss = self._compute_center_loss(directions, vertices, points)
+    dt.append(tf.constant(time()-prev_time))
     # inside_loss = self._compute_inside_loss(distance)
 
-    loss = dist_loss + 0.1*overlap_loss + sample_loss + 0.1*center_loss
-    # loss = dist_loss + 0.1*overlap_loss + center_loss + inside_loss
+    loss = dist_loss + 0.1*overlap_loss + sample_loss + 10*center_loss
+    # loss = dist_loss + 0.1*sample_loss
 
     if training:
       tf.summary.scalar("loss", loss)
@@ -112,7 +129,7 @@ class MultiConvexNet(keras.Model):
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
       # return loss, train_op, global_step, out_points, vertices, smoothness, points, overlap, distance, iter, iter_dist, undef, undef_dist
-      return loss, train_op, global_step, vertices, smoothness, overlap
+      return loss, train_op, global_step, vertices, smoothness, overlap, dt
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -193,6 +210,14 @@ class MultiConvexNet(keras.Model):
     sample_loss = tf.reduce_mean(sample_loss)
     
     return sample_loss
+
+  # def _compute_sample_loss(self, surf_points, points):
+  #   point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
+  #   sample_loss = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
+  #   sample_loss = tf.reduce_min(sample_loss, axis = 1) # (B,CD,1)
+  #   sample_loss = tf.reduce_mean(sample_loss)
+    
+  #   return sample_loss
 
   # def _compute_center_loss(self, vertices):
   #   center = tf.reduce_mean(vertices, axis = 2, keepdims = True) # (B,C,1,3)
