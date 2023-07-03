@@ -44,13 +44,27 @@ def shapenet(split, args):
   dims = 3
 
   def _parser(example):
+    # fs = tf.parse_single_example(
+    #     example,
+    #     features={
+    #         "point_samples":
+    #             tf.FixedLenFeature([total_points * dims], tf.float32)
+    #     })
+    # fs["point_samples"] = tf.reshape(fs["point_samples"], [total_points, dims])
+
     fs = tf.parse_single_example(
         example,
         features={
             "point_samples":
-                tf.FixedLenFeature([total_points * dims], tf.float32)
+                tf.FixedLenFeature([total_points * dims], tf.float32), 
+            "nearsurf_samples":
+                tf.FixedLenFeature([total_points * dims], tf.float32), 
+            "out_samples": 
+                tf.FixedLenFeature([total_points * dims], tf.float32),
         })
     fs["point_samples"] = tf.reshape(fs["point_samples"], [total_points, dims])
+    fs["nearsurf_samples"] = tf.reshape(fs["nearsurf_samples"], [total_points, dims])
+    fs["out_samples"] = tf.reshape(fs["out_samples"], [total_points, dims])
     return fs
 
   def _sampler(example):
@@ -70,9 +84,41 @@ def shapenet(split, args):
 
     points = tf.reshape(points, [sample_point, 3])
 
+    nearsurf_points = []
+    if sample_point > 0:
+      if split == "train":
+        indices_bbx = tf.random.uniform([sample_point],
+                                        minval=0,
+                                        maxval=total_points,
+                                        dtype=tf.int32)
+        nearsurf_samples = tf.gather(example["nearsurf_samples"], indices_bbx, axis=0)
+      else:
+        nearsurf_samples = example["nearsurf_samples"]
+      nearsurf_points.append(nearsurf_samples)
+    nearsurf_points = tf.reshape(nearsurf_points, [sample_point, 3])
+
+    out_points = []
+    if sample_point > 0:
+      if split == "train":
+        indices_bbx = tf.random.uniform([sample_point],
+                                        minval=0,
+                                        maxval=total_points,
+                                        dtype=tf.int32)
+        out_samples = tf.gather(example["out_samples"], indices_bbx, axis=0)
+      else:
+        out_samples = example["out_samples"]
+      out_points.append(out_samples)
+    out_points = tf.reshape(out_points, [sample_point, 3])
+
+    # return {
+    #     "point": points
+    # }
     return {
-        "point": points
+        "point": points, 
+        "nearsurf_point": nearsurf_points, 
+        "out_point": out_points
     }
+
 
   data_pattern = path.join(data_dir, "{}-{}-*".format(args.obj_class, split))
   data_files = tf.gfile.Glob(data_pattern)

@@ -56,7 +56,7 @@ def main(unused_argv):
   # Set up the graph
   # train_loss, train_op, global_step, out_points, vert, smooth, points, overlap = model.compute_loss(
   #     batch, training=True, optimizer=tf.train.AdamOptimizer)
-  train_loss, train_op, global_step, vert, smooth, overlap, dt = model.compute_loss(
+  train_loss, train_op, global_step, vert, smooth, overlap = model.compute_loss(
       batch, training=True, optimizer=tf.train.AdamOptimizer)
 
   # Training hooks
@@ -89,13 +89,13 @@ def main(unused_argv):
     while not mon_sess.should_stop():
       # unused_var, loss_var, step_var, unused_var4, out_var, vert_var, smooth_var, points_var, overlap_var = mon_sess.run(
       #   [batch, train_loss, global_step, train_op, out_points, vert, smooth, points, overlap])
-      unused_var, loss_var, step_var, unused_var4, vert_var, smooth_var, overlap_var, dt_var = mon_sess.run(
-        [batch, train_loss, global_step, train_op, vert, smooth, overlap, dt])
+      unused_var, loss_var, step_var, unused_var4, vert_var, smooth_var, overlap_var = mon_sess.run(
+        [batch, train_loss, global_step, train_op, vert, smooth, overlap])
       # distance_var = np.min(np.abs(distance_var), axis = 1)
       if step_var % 100 == 0:
         print("")
         print("Step: ", step_var, "\t\tLoss: ", loss_var)
-        print("Time: ", dt_var)
+        # print("Time: ", dt_var)
         # print("Smoothness: ", smooth_var[0, :])
         # print("Growth Ratio: ", overlap_var[0, :, 0])
         # print("Distances: ", np.array([np.min(distance_var), np.max(distance_var)]))

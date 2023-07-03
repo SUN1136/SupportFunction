@@ -54,7 +54,7 @@ class ConvexDecoder(keras.layers.Layer):
     self.directions = tf.reshape(self.directions, [-1, self._dims])
 
 
-  def call(self, vertices, smoothness, pointcloud):
+  def call(self, vertices, smoothness, pointcloud, nearsurf, out):
     """Decode the support function parameters into surface point samples.
 
     Args:
@@ -74,13 +74,13 @@ class ConvexDecoder(keras.layers.Layer):
     local_vertices = vertices - mean_vertices
 
     # direction_h, points, overlap, distance, surf_distance, directions, iter, iter_dist, undef, undef_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
-    overlap, distance, directions, surf_distance, surf_points = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud)
+    overlap, distance, directions, surf_distance, surf_points, nearsurf_dist, out_dist = self._compute_output(self.directions, local_vertices, smoothness, mean_vertices, pointcloud, nearsurf, out)
     # mean_vertices = tf.reshape(mean_vertices, [tf.shape(mean_vertices)[0], tf.shape(mean_vertices)[1], tf.shape(mean_vertices)[-1]])
 
     # return points, direction_h, overlap, distance, surf_distance, directions, mean_vertices, iter, iter_dist, undef, undef_dist
-    return overlap, distance, directions, surf_distance, surf_points
+    return overlap, distance, directions, surf_distance, surf_points, nearsurf_dist, out_dist
 
-  def _compute_output(self, x, vertices, smoothness, translations, pointcloud):
+  def _compute_output(self, x, vertices, smoothness, translations, pointcloud, nearsurf, out):
     """Compute output.
 
     Args:
@@ -131,12 +131,15 @@ class ConvexDecoder(keras.layers.Layer):
 
 
 
+    nearsurf_dist = self._compute_distance(vertices, smoothness, translations, tf.tile(tf.expand_dims(nearsurf, axis = 1), [1, self._n_parts, 1, 1]))
+    out_dist = self._compute_distance(vertices, smoothness, translations, tf.tile(tf.expand_dims(out, axis = 1), [1, self._n_parts, 1, 1]))
+
     # retraction = tf.zeros((1, 100, 1))
     # iter_ret = tf.constant([1, 1])
     # undef_ret = tf.constant([[1.0], [1.0]])
 
     # return direction_h, surf_points, overlap, distance, surf_distance, x, iter, iter_dist, undef, undef_dist
-    return overlap, distance, x, surf_distance, surf_points
+    return overlap, distance, x, surf_distance, surf_points, nearsurf_dist, out_dist
 
   def _compute_spt(self, x, vertices, smoothness, translations, get_h = True, get_dsdx = False, get_surf = True):
     """Compute output.

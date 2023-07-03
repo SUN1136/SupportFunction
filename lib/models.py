@@ -77,38 +77,35 @@ class MultiConvexNet(keras.Model):
       global_step: tf.Operation, gloabl step hook.
     """
     points = batch["point"]
+    nearsurf_points = batch["nearsurf_point"]
+    out_points = batch["out_point"]
 
     if not self._image_input:
       beta = self.encode(points, training=training)
 
-    dt = []
-    prev_time = time()
+    # dt = []
+    # prev_time = time()
     # out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist = self.decode(
     #   beta, points, training=training)
-    overlap, distance, vertices, smoothness, directions, surf_distance, surf_points = self.decode(
-      beta, points, training=training)
-    dt.append(tf.constant(time()-prev_time))
+    overlap, distance, vertices, smoothness, directions, surf_distance, surf_points, nearsurf_dist, out_dist = self.decode(
+      beta, points, nearsurf_points, out_points, training=training)
+    # dt.append(tf.constant(time()-prev_time))
 
-    prev_time = time()
     dist_loss = self._compute_distance_loss(distance)
-    dt.append(tf.constant(time()-prev_time))
-    
-    prev_time = time()
-    overlap_loss = self._compute_overlap_loss(overlap)
-    dt.append(tf.constant(time()-prev_time))
 
-    prev_time = time()
+    overlap_loss = self._compute_overlap_loss(overlap)
+
     sample_loss = self._compute_sample_loss(surf_distance, surf_points, points)
-    dt.append(tf.constant(time()-prev_time))
     # sample_loss = self._compute_sample_loss(surf_points, points)
     # center_loss = self._compute_center_loss(vertices)
 
-    prev_time = time()
-    center_loss = self._compute_center_loss(directions, vertices, points)
-    dt.append(tf.constant(time()-prev_time))
+    # center_loss = self._compute_center_loss(directions, vertices, points)
     # inside_loss = self._compute_inside_loss(distance)
 
-    loss = dist_loss + 0.1*overlap_loss + sample_loss + 10*center_loss
+    nearsurf_loss = self._compute_nearsurf_loss(nearsurf_dist)
+    out_loss = self._compute_out_loss(out_dist)
+
+    loss = dist_loss + 0.1*overlap_loss + sample_loss + nearsurf_loss + out_loss
     # loss = dist_loss + 0.1*sample_loss
 
     if training:
@@ -129,7 +126,7 @@ class MultiConvexNet(keras.Model):
         train_op = optimizer.apply_gradients(
             zip(gradients, variables), global_step=global_step)
       # return loss, train_op, global_step, out_points, vertices, smoothness, points, overlap, distance, iter, iter_dist, undef, undef_dist
-      return loss, train_op, global_step, vertices, smoothness, overlap, dt
+      return loss, train_op, global_step, vertices, smoothness, overlap
     # else:
     #   occ = tf.cast(output >= self._level_set, tf.float32)
     #   intersection = tf.reduce_sum(occ * gt, axis=(1, 2))
@@ -150,7 +147,7 @@ class MultiConvexNet(keras.Model):
     x = self.point_encoder(points, training=training)
     return self.beta_decoder(x, training=training)
 
-  def decode(self, params, pointcloud, training):
+  def decode(self, params, pointcloud, nearsurf, out, training):
     """Decode the support function parameters into indicator fuctions.
 
     Args:
@@ -162,9 +159,9 @@ class MultiConvexNet(keras.Model):
     """
     vertices, smoothness = self._split_params(params)
     # out_points, direction_h, overlap, distance, surf_distance, directions, trans, iter, iter_dist, undef, undef_dist = self.cvx(vertices, smoothness, pointcloud)
-    overlap, distance, directions, surf_distance, surf_points = self.cvx(vertices, smoothness, pointcloud)
+    overlap, distance, directions, surf_distance, surf_points, nearsurf_dist, out_dist = self.cvx(vertices, smoothness, pointcloud, nearsurf, out)
     # return out_points, direction_h, overlap, distance, surf_distance, directions, trans, vertices, smoothness, iter, iter_dist, undef, undef_dist
-    return overlap, distance, vertices, smoothness, directions, surf_distance, surf_points
+    return overlap, distance, vertices, smoothness, directions, surf_distance, surf_points, nearsurf_dist, out_dist
 
   def _split_params(self, params):
     """Split the parameter tensor."""
@@ -259,6 +256,18 @@ class MultiConvexNet(keras.Model):
     center_loss = tf.reduce_mean(center_loss*center_loss)
 
     return center_loss
+
+  def _compute_nearsurf_loss(self, distance):
+    nearsurf_loss = tf.reduce_min(distance, axis = 1)
+    nearsurf_loss = tf.cast(nearsurf_loss < 0, tf.float32) * nearsurf_loss
+    nearsurf_loss = tf.reduce_mean(tf.abs(nearsurf_loss))
+    return nearsurf_loss
+
+  def _compute_out_loss(self, distance):
+    out_loss = tf.reduce_min(distance, axis = 1)
+    out_loss = tf.cast(out_loss < 0, tf.float32) * out_loss
+    out_loss = tf.reduce_mean(tf.abs(out_loss))
+    return out_loss
   
   # def _compute_sample_loss(self, gt, output):
   #   gt = tf.expand_dims(gt, axis = 1)

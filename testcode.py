@@ -28,10 +28,4 @@ keras = tf.keras
 #     except RuntimeError as e:
 #         print(e)
 
-def add(x, y):
-    return x + y
-
-x = tf.constant([1.0, 2.0])
-y = tf.constant([3.0, 5.0])
-z = tf.tidy(add(x, y))
-print(z)
+print(np.random.rand(3, ))
