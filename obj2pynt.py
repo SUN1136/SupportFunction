@@ -44,7 +44,7 @@ def get_points(object, n, folder_name = None):
         if not tf.io.gfile.isdir(dataset_path + "/" + folder_name):
             tf.io.gfile.makedirs(dataset_path + "/" + folder_name)
     example_path = dataset_path + "/" + object_folder + "-train-data.tfrecords"
-    write_tfrecord(points, example_path)
+    # write_tfrecord(points, example_path)
 
     return points
 
@@ -61,9 +61,9 @@ def main():
 
     num_points = 100000
     # points = get_points("franka_link2", num_points)
-    points = get_points_from_folder("airplane", num_points)
+    # points = get_points_from_folder("airplane", num_points)
     points = get_points_from_folder("chair", num_points)
-    points = get_points_from_folder("pistol", num_points)
+    # points = get_points_from_folder("pistol", num_points)
 
 
 

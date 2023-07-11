@@ -105,7 +105,7 @@ class MultiConvexNet(keras.Model):
     nearsurf_loss = self._compute_nearsurf_loss(nearsurf_dist)
     out_loss = self._compute_out_loss(out_dist)
 
-    loss = dist_loss + 0.1*overlap_loss + sample_loss + nearsurf_loss + out_loss
+    loss = dist_loss + sample_loss + 0.1*overlap_loss + 2*nearsurf_loss + 2*out_loss
     # loss = dist_loss + 0.1*sample_loss
 
     if training:
@@ -201,6 +201,7 @@ class MultiConvexNet(keras.Model):
   def _compute_sample_loss(self, surf_distance, surf_points, points):
     point_dist = tf.expand_dims(points, axis = 2) - tf.expand_dims(surf_points, axis = 1) # (B,P,CD,3)
     point_dist = tf.reduce_sum(point_dist*point_dist, axis = -1, keepdims = True) # (B,P,CD,1)
+    # surf_distance = tf.cast(surf_distance >= 0, tf.float32) * surf_distance
     sample_loss = tf.concat([surf_distance*surf_distance, point_dist], axis = 1) # (B,C+P,CD,1)
     # sample_loss = tf.concat([tf.tanh(10*surf_distance)**2, tf.tanh(10*tf.sqrt(point_dist + 1e-30))**2], axis = 1) # (B,C+P,CD,1)
     sample_loss = tf.reduce_min(sample_loss, axis = 1) # (B,CD,1)

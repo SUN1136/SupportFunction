@@ -62,19 +62,22 @@ for i in range(n):
     samples.append(surfp)
 
     camp = caminfo[vidx]
-    outp = surfp + (camp - surfp)/np.linalg.norm(camp - surfp) * (np.random.rand()*0.1+0.001)
+    outp = surfp + (camp - surfp)/np.linalg.norm(camp - surfp) * (np.random.rand()*0.05+0.001)
     nearsurf_samples.append(outp)
-    
-    mag = np.random.rand(3, )
-    for j in range(3):
-        outp = surfp + (camp - surfp) * mag[j]
-        if (np.abs(outp[0]) <= 1.0) and (np.abs(outp[1]) <= 1.0) and (np.abs(outp[2]) <= 1.0):
-            tmp_samples.append(outp)
 
-tmp_samples = np.array(tmp_samples)
-out_idx = np.random.choice(tmp_samples.shape[0], n, False)
-for i in range(n):
-    out_samples.append(tmp_samples[out_idx[i], :])
+    outp = surfp + (camp - surfp)/np.linalg.norm(camp - surfp) * (np.random.rand()*0.1+0.05)
+    out_samples.append(outp)
+    
+    # mag = np.random.rand(3, )
+    # for j in range(3):
+    #     outp = surfp + (camp - surfp) * mag[j]
+    #     if (np.abs(outp[0]) <= 1.0) and (np.abs(outp[1]) <= 1.0) and (np.abs(outp[2]) <= 1.0):
+    #         tmp_samples.append(outp)
+
+# tmp_samples = np.array(tmp_samples)
+# out_idx = np.random.choice(tmp_samples.shape[0], n, False)
+# for i in range(n):
+#     out_samples.append(tmp_samples[out_idx[i], :])
 
 
 
@@ -98,5 +101,5 @@ with tf.io.gfile.GFile("./data/out_points.csv", "w") as fout:
 samples = samples.reshape(-1, )
 nearsurf_samples = nearsurf_samples.reshape(-1, )
 out_samples = out_samples.reshape(-1, )
-example_path = "./data/example-train-data.tfrecords"
+example_path = "./data/airplane_0-train-data.tfrecords"
 write_tfrecord(samples, nearsurf_samples, out_samples, example_path)

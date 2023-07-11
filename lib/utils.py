@@ -51,7 +51,7 @@ def define_flags():
   flags.DEFINE_string(
       "train_dir", None, "The base directory to save training info and"
       "checkpoints.")
-  flags.DEFINE_integer("save_every", 25000,
+  flags.DEFINE_integer("save_every", 50000,
                        "The number of steps to save checkpoint.")
   flags.DEFINE_integer("max_steps", 50000, "The number of steps of training.")
   flags.DEFINE_integer("batch_size", 1, "Batch size.")
